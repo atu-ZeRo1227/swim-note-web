@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendEmailVerification, sendPasswordResetEmail, GoogleAuthProvider, signInWithPopup, OAuthProvider } from "firebase/auth";
+import { useState, useEffect } from "react";
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendEmailVerification, sendPasswordResetEmail, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, OAuthProvider } from "firebase/auth";
 import { auth, db } from "../../lib/firebase";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { useRouter } from "next/navigation";
@@ -13,6 +13,40 @@ export default function LoginPage() {
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
     const [message, setMessage] = useState("");
+
+    // Handle redirect result (for mobile/safari compatibility)
+    useEffect(() => {
+        const checkRedirectResult = async () => {
+            try {
+                const result = await getRedirectResult(auth);
+                if (result) {
+                    const user = result.user;
+                    // アカウント情報をFirestoreに保存/更新
+                    try {
+                        await setDoc(doc(db, "users", user.uid), {
+                            email: user.email,
+                            lastLogin: serverTimestamp(),
+                        }, { merge: true });
+                    } catch (fsError) {
+                        console.error("Firestore Error (Redirect Auth):", fsError);
+                    }
+                    router.push("/");
+                }
+            } catch (e: any) {
+                console.error("Redirect Auth Error:", e);
+                if (e.code === "auth/operation-not-allowed") {
+                    setError("Google/Apple認証が有効になっていません。Firebaseコンソール（Authentication > Settings）で有効にしてください。");
+                } else if (e.code === "auth/unauthorized-domain") {
+                    setError("このドメイン（URL）はFirebaseで許可されていません。Firebaseコンソールの「承認済みドメイン」に現在のドメインを追加してください。");
+                } else if (e.code === "auth/auth-domain-config-required") {
+                    setError("FirebaseのauthDomain設定が正しくありません。");
+                } else if (e.code !== "auth/popup-closed-by-user") {
+                    setError(`認証エラーが発生しました: ${e.code}`);
+                }
+            }
+        };
+        checkRedirectResult();
+    }, [router]);
 
     const handleAuth = async () => {
         setError("");
@@ -103,23 +137,29 @@ export default function LoginPage() {
         setMessage("");
         const provider = new GoogleAuthProvider();
         try {
-            const userCredential = await signInWithPopup(auth, provider);
-
-            // アカウント情報をFirestoreに保存/更新
-            try {
-                await setDoc(doc(db, "users", userCredential.user.uid), {
-                    email: userCredential.user.email,
-                    lastLogin: serverTimestamp(),
-                }, { merge: true });
-            } catch (fsError) {
-                console.error("Firestore Error (Google Auth):", fsError);
-            }
-
+            // まずはポップアップを試行（デスクトップでUXが良いため）
+            const result = await signInWithPopup(auth, provider);
+            const user = result.user;
+            await setDoc(doc(db, "users", user.uid), {
+                email: user.email,
+                lastLogin: serverTimestamp(),
+            }, { merge: true });
             router.push("/");
         } catch (e: any) {
-            console.error(e);
-            if (e.code !== "auth/popup-closed-by-user") {
-                setError("Google認証に失敗しました。");
+            console.error("Google Auth Error:", e);
+            // ポップアップがブロックされた、またはリダイレクトが必要な環境（一部のモバイル等）の場合
+            if (e.code === "auth/popup-blocked" || e.code === "auth/cancelled-popup-request") {
+                try {
+                    await signInWithRedirect(auth, provider);
+                } catch (re) {
+                    setError("Google認証の開始に失敗しました。ブラウザの設定を確認してください。");
+                }
+            } else if (e.code === "auth/operation-not-allowed") {
+                setError("Google認証が有効になっていません。Firebaseコンソールで有効にしてください。");
+            } else if (e.code === "auth/unauthorized-domain") {
+                setError("このドメイン（URL）はFirebaseで許可されていません。Firebaseの「承認済みドメイン」を確認してください。");
+            } else if (e.code !== "auth/popup-closed-by-user") {
+                setError(`Google認証に失敗しました: ${e.code}`);
             }
         }
     };
@@ -129,23 +169,27 @@ export default function LoginPage() {
         setMessage("");
         const provider = new OAuthProvider('apple.com');
         try {
-            const userCredential = await signInWithPopup(auth, provider);
-
-            // アカウント情報をFirestoreに保存/更新
-            try {
-                await setDoc(doc(db, "users", userCredential.user.uid), {
-                    email: userCredential.user.email,
-                    lastLogin: serverTimestamp(),
-                }, { merge: true });
-            } catch (fsError) {
-                console.error("Firestore Error (Apple Auth):", fsError);
-            }
-
+            const result = await signInWithPopup(auth, provider);
+            const user = result.user;
+            await setDoc(doc(db, "users", user.uid), {
+                email: user.email,
+                lastLogin: serverTimestamp(),
+            }, { merge: true });
             router.push("/");
         } catch (e: any) {
-            console.error(e);
-            if (e.code !== "auth/popup-closed-by-user") {
-                setError("Apple認証に失敗しました。");
+            console.error("Apple Auth Error:", e);
+            if (e.code === "auth/popup-blocked" || e.code === "auth/cancelled-popup-request") {
+                try {
+                    await signInWithRedirect(auth, provider);
+                } catch (re) {
+                    setError("Apple認証の開始に失敗しました。ブラウザの設定を確認してください。");
+                }
+            } else if (e.code === "auth/operation-not-allowed") {
+                setError("Apple認証が有効になっていません。Firebaseコンソールで有効にしてください。");
+            } else if (e.code === "auth/unauthorized-domain") {
+                setError("このドメイン（URL）はFirebaseで許可されていません。");
+            } else if (e.code !== "auth/popup-closed-by-user") {
+                setError(`Apple認証に失敗しました: ${e.code}`);
             }
         }
     };

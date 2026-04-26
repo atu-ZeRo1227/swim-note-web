@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { auth, db } from "../lib/firebase";
-import { onAuthStateChanged, signOut, User } from "firebase/auth";
-import { doc, getDoc, setDoc, serverTimestamp, collection, query, orderBy, limit, onSnapshot } from "firebase/firestore";
+import { onAuthStateChanged, signOut, User, reauthenticateWithCredential, EmailAuthProvider, updateEmail, updatePassword, deleteUser, GoogleAuthProvider, OAuthProvider } from "firebase/auth";
+import { doc, getDoc, setDoc, deleteDoc, getDocs, serverTimestamp, collection, query, orderBy, limit, onSnapshot } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 
 interface Profile {
@@ -44,6 +44,7 @@ interface SwimmingTime {
     distance: string;
     time: string;
     date?: string;
+    timestamp?: any;
 }
 
 interface Announcement {
@@ -112,6 +113,9 @@ export default function Home() {
     const [announcements, setAnnouncements] = useState<Announcement[]>([]);
     const [showNewsList, setShowNewsList] = useState(false);
     const [hasUnreadNews, setHasUnreadNews] = useState(false);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    const [showAccountDeleteConfirm, setShowAccountDeleteConfirm] = useState(false);
+    const [emailForm, setEmailForm] = useState({ currentPassword: "", newEmail: "", newPassword: "" });
 
     useEffect(() => {
         let isMounted = true;
@@ -286,7 +290,6 @@ export default function Home() {
             const uniqueId = `${today}_${timestamp}`;
 
             // 既存の記録件数を確認
-            const { collection, getDocs, query } = await import("firebase/firestore");
             const q = query(collection(db, "users", user.uid, "daily_records"));
             const snapshot = await getDocs(q);
 
@@ -343,7 +346,6 @@ export default function Home() {
             const uniqueId = `${today}_${timestamp}`;
 
             // 既存の記録件数を確認
-            const { collection, getDocs, query } = await import("firebase/firestore");
             const q = query(collection(db, "users", user.uid, "daily_records"));
             const snapshot = await getDocs(q);
 
@@ -394,13 +396,13 @@ export default function Home() {
             const timestamp = Date.now();
             const uniqueId = editingTime?.id || `time_${timestamp}`;
 
-            const recordData = {
+            const recordData: any = {
                 stroke: timeForm.stroke,
                 distance: timeForm.distance,
                 time: timeForm.time,
                 date: editingTime?.date || today,
                 updatedAt: serverTimestamp(),
-                timestamp: editingTime?.id ? undefined : serverTimestamp(), // Only for new records
+                timestamp: editingTime?.timestamp || serverTimestamp(),
             };
 
             await setDoc(doc(db, "users", user.uid, "swimming_times", uniqueId), recordData, { merge: true });
@@ -420,11 +422,35 @@ export default function Home() {
         }
     };
 
+    const handleDeleteTime = (timeToDelete?: SwimmingTime) => {
+        const target = timeToDelete || editingTime;
+        if (!target || !target.id) return;
+        setEditingTime(target);
+        setShowDeleteConfirm(true);
+    };
+
+    const confirmDelete = async () => {
+        if (!user || !editingTime || !editingTime.id || isSubmitting) return;
+
+        setIsSubmitting(true);
+        try {
+            await deleteDoc(doc(db, "users", user.uid, "swimming_times", editingTime.id));
+            setTimeHistory((prev) => prev.filter((t) => t.id !== editingTime.id));
+            setShowDeleteConfirm(false);
+            setShowTimeInput(false);
+            setEditingTime(null);
+            setTimeForm({ stroke: "", distance: "", time: "" });
+        } catch (error: any) {
+            console.error("Delete error:", error);
+            alert(`削除に失敗しました: ${error.message || "不明なエラー"}`);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
     const fetchTimeHistory = async () => {
         if (!user) return;
-        setLoading(true);
         try {
-            const { collection, query, getDocs, orderBy } = await import("firebase/firestore");
             const q = query(collection(db, "users", user.uid, "swimming_times"), orderBy("date", "desc"));
             const querySnapshot = await getDocs(q);
             const times: SwimmingTime[] = [];
@@ -435,12 +461,11 @@ export default function Home() {
             setShowTimeHistory(true);
         } catch (error) {
             console.error("Error fetching time history:", error);
-        } finally {
-            setLoading(false);
         }
     };
 
     const handleEditTime = (time: SwimmingTime) => {
+        console.log("Editing time:", time);
         setEditingTime(time);
         setTimeForm({
             stroke: time.stroke,
@@ -454,7 +479,6 @@ export default function Home() {
         if (!user) return;
         setLoading(true);
         try {
-            const { collection, query, getDocs, orderBy } = await import("firebase/firestore");
             const q = query(collection(db, "users", user.uid, "daily_records"), orderBy("date", "desc"));
             const querySnapshot = await getDocs(q);
             const records: SavedDailyRecord[] = [];
@@ -468,6 +492,59 @@ export default function Home() {
             console.error("Error fetching history:", error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleUpdateLoginInfo = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!user || isSubmitting) return;
+
+        setIsSubmitting(true);
+        try {
+            const credential = EmailAuthProvider.credential(user.email!, emailForm.currentPassword);
+            await reauthenticateWithCredential(user, credential);
+
+            if (emailForm.newEmail && emailForm.newEmail !== user.email) {
+                await updateEmail(user, emailForm.newEmail);
+            }
+            if (emailForm.newPassword) {
+                await updatePassword(user, emailForm.newPassword);
+            }
+
+            alert("ログイン情報を更新しました。");
+            setShowLoginEdit(false);
+            setEmailForm({ currentPassword: "", newEmail: "", newPassword: "" });
+        } catch (error: any) {
+            console.error("Update login error:", error);
+            alert(`更新に失敗しました: ${error.message}`);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleDeleteAccount = async () => {
+        if (!user || isSubmitting) return;
+
+        setIsSubmitting(true);
+        try {
+            // Firestoreのユーザーデータを削除
+            await deleteDoc(doc(db, "users", user.uid));
+            
+            // アカウントを削除
+            await deleteUser(user);
+            
+            alert("アカウントを削除しました。");
+            router.push("/login");
+        } catch (error: any) {
+            console.error("Delete account error:", error);
+            if (error.code === "auth/requires-recent-login") {
+                alert("セキュリティ保護のため、再ログインしてから再度お試しください。");
+            } else {
+                alert(`削除に失敗しました: ${error.message}`);
+            }
+        } finally {
+            setIsSubmitting(false);
+            setShowAccountDeleteConfirm(false);
         }
     };
 
@@ -647,18 +724,57 @@ export default function Home() {
                             />
                         </div>
 
-                        <button
-                            type="submit"
-                            disabled={isSubmitting}
-                            className={`w-full font-black py-4 rounded-xl mt-6 transition-all active:scale-[0.98] shadow-lg ${isSubmitting
-                                ? "bg-gray-800 text-gray-500 cursor-not-allowed"
-                                : "bg-white text-black hover:bg-gray-100"
-                                }`}
-                        >
-                            {isSubmitting ? "保存中..." : editingTime ? "更新する" : "タイムを保存"}
-                        </button>
+                        <div className="flex space-x-3 mt-6">
+                            {editingTime && (
+                                <button
+                                    type="button"
+                                    onClick={() => handleDeleteTime()}
+                                    disabled={isSubmitting}
+                                    className="flex-1 font-black py-4 rounded-xl transition-all active:scale-[0.98] shadow-lg bg-red-900/20 text-red-500 border border-red-900/30 hover:bg-red-900/30"
+                                >
+                                    削除
+                                </button>
+                            )}
+                            <button
+                                type="submit"
+                                disabled={isSubmitting}
+                                className={`flex-[2] font-black py-4 rounded-xl transition-all active:scale-[0.98] shadow-lg ${isSubmitting
+                                    ? "bg-gray-800 text-gray-500 cursor-not-allowed"
+                                    : "bg-white text-black hover:bg-gray-100"
+                                    }`}
+                            >
+                                {isSubmitting ? "保存中..." : editingTime ? "更新する" : "タイムを保存"}
+                            </button>
+                        </div>
                     </form>
                 </div>
+
+                {showDeleteConfirm && (
+                    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
+                        <div className="w-full max-w-xs bg-[#1a1a1a] border border-gray-800 rounded-3xl p-8 shadow-2xl animate-in zoom-in-95 duration-300">
+                            <h3 className="text-lg font-bold text-center mb-2 text-white">削除の確認</h3>
+                            <p className="text-gray-400 text-sm text-center mb-8">
+                                このタイムを削除してもよろしいですか？
+                            </p>
+                            <div className="flex flex-col space-y-3">
+                                <button
+                                    onClick={confirmDelete}
+                                    disabled={isSubmitting}
+                                    className="w-full bg-red-600 text-white font-bold py-3.5 rounded-2xl active:scale-95 transition-all shadow-lg shadow-red-900/20"
+                                >
+                                    {isSubmitting ? "削除中..." : "削除する"}
+                                </button>
+                                <button
+                                    onClick={() => setShowDeleteConfirm(false)}
+                                    disabled={isSubmitting}
+                                    className="w-full bg-[#252525] text-gray-300 font-bold py-3.5 rounded-2xl active:scale-95 transition-all"
+                                >
+                                    キャンセル
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </main>
         );
     }
@@ -675,7 +791,19 @@ export default function Home() {
                         >
                             ←
                         </button>
-                        <h2 className="text-2xl font-bold tracking-tight">自己ベスト</h2>
+                        <div className="flex items-center space-x-3">
+                            <h2 className="text-2xl font-bold tracking-tight">自己ベスト</h2>
+                            <button
+                                onClick={() => {
+                                    setEditingTime(null);
+                                    setTimeForm({ stroke: "", distance: "", time: "" });
+                                    setShowTimeInput(true);
+                                }}
+                                className="bg-white text-black text-[11px] font-black px-4 py-2 rounded-full hover:bg-gray-200 transition-all active:scale-95"
+                            >
+                                タイム記入
+                            </button>
+                        </div>
                     </header>
 
                     <div className="space-y-3">
@@ -1209,86 +1337,7 @@ export default function Home() {
     }
 
     // Login Info Edit
-    if (showLoginEdit && user) {
-        return (
-            <main className="min-h-screen bg-[#121212] text-white p-6 flex items-center justify-center">
-                <div className="w-full max-w-md bg-[#1a1a1a] p-8 rounded-2xl border border-gray-800 shadow-2xl relative">
-                    <button
-                        onClick={() => setShowLoginEdit(false)}
-                        className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors p-2"
-                    >
-                        ✕
-                    </button>
-                    <h2 className="text-2xl font-bold mb-8 text-center tracking-tight">ログイン情報編集</h2>
 
-                    <div className="space-y-8">
-                        <form onSubmit={(e) => {
-                            e.preventDefault();
-                            const formData = new FormData(e.currentTarget);
-                            handleEmailUpdate(formData.get("email") as string);
-                        }} className="space-y-4">
-                            <div>
-                                <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">メールアドレス</label>
-                                <input
-                                    name="email"
-                                    type="email"
-                                    defaultValue={user.email || ""}
-                                    required
-                                    className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
-                                />
-                            </div>
-                            <button
-                                type="submit"
-                                disabled={isSubmitting}
-                                className="w-full py-2 bg-gray-800 text-white rounded-lg text-sm font-bold hover:bg-gray-700 transition-all"
-                            >
-                                メールアドレスを変更
-                            </button>
-                        </form>
-
-                        <div className="h-[1px] bg-gray-800 w-full"></div>
-
-                        <form onSubmit={(e) => {
-                            e.preventDefault();
-                            const formData = new FormData(e.currentTarget);
-                            const pass = formData.get("password") as string;
-                            const confirm = formData.get("confirm") as string;
-                            if (pass !== confirm) return alert("パスワードが一致しません");
-                            handlePasswordUpdate(pass);
-                        }} className="space-y-4">
-                            <div>
-                                <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">新しいパスワード</label>
-                                <input
-                                    name="password"
-                                    type="password"
-                                    required
-                                    minLength={6}
-                                    className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">新しいパスワード（確認）</label>
-                                <input
-                                    name="confirm"
-                                    type="password"
-                                    required
-                                    minLength={6}
-                                    className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
-                                />
-                            </div>
-                            <button
-                                type="submit"
-                                disabled={isSubmitting}
-                                className="w-full py-2 bg-gray-800 text-white rounded-lg text-sm font-bold hover:bg-gray-700 transition-all"
-                            >
-                                パスワードを変更
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            </main>
-        );
-    }
 
     // Profile Setup Form
     if (needsSetup || (showProfileEdit && user)) {
@@ -1406,7 +1455,177 @@ export default function Home() {
             </main>
         );
     }
+    if (showLoginDisplay) {
+        const providers = user?.providerData.map(p => p.providerId) || [];
+        const isEmailUser = providers.includes("password");
+        const isGoogleUser = providers.includes("google.com");
+        const isAppleUser = providers.includes("apple.com");
 
+        return (
+            <main className="min-h-screen bg-[#121212] text-white p-6 flex flex-col items-center">
+                <div className="w-full max-w-md">
+                    <header className="flex items-center mb-8">
+                        <button
+                            onClick={() => setShowLoginDisplay(false)}
+                            className="mr-3 p-2 hover:bg-white/10 rounded-full transition-colors"
+                        >
+                            ←
+                        </button>
+                        <h2 className="text-xl font-bold">ログイン情報</h2>
+                    </header>
+
+                    <div className="space-y-6">
+                        <section>
+                            <h3 className="text-[10px] font-black text-gray-500 mb-3 uppercase tracking-[0.2em] ml-1">基本情報</h3>
+                            <div className="bg-[#1a1a1a] rounded-2xl border border-gray-800 overflow-hidden">
+                                {/* 電話番号 */}
+                                <div className="flex justify-between items-center px-5 py-4 border-b border-gray-800/50">
+                                    <span className="text-sm font-bold text-gray-400">電話番号</span>
+                                    <span className="text-sm text-gray-200">{user?.phoneNumber || "未登録"}</span>
+                                </div>
+
+                                {/* メールアドレス */}
+                                <div className="flex justify-between items-center px-5 py-4 border-b border-gray-800/50">
+                                    <span className="text-sm font-bold text-gray-400">メールアドレス</span>
+                                    <span className="text-sm text-gray-200 truncate max-w-[180px]">{user?.email || "未登録"}</span>
+                                </div>
+
+                                {/* パスワード */}
+                                <button
+                                    onClick={() => isEmailUser && setShowLoginEdit(true)}
+                                    className="w-full flex justify-between items-center px-5 py-4 border-b border-gray-800/50 hover:bg-white/5 transition-colors group"
+                                >
+                                    <span className="text-sm font-bold text-gray-400">パスワード</span>
+                                    <span className="text-sm text-gray-200 flex items-center">
+                                        登録完了 <span className="ml-2 text-gray-600 group-hover:translate-x-1 transition-transform">＞</span>
+                                    </span>
+                                </button>
+
+                                {/* Apple/Google */}
+                                <div className="flex justify-between items-center px-5 py-5">
+                                    <div className="flex flex-col">
+                                        <span className="text-sm font-bold text-gray-400">Apple / Google</span>
+                                        <div className="flex space-x-2 mt-2">
+                                            {isAppleUser && <span className="text-[10px] bg-white/10 px-2 py-0.5 rounded text-gray-300">🍎 Apple連携中</span>}
+                                            {isGoogleUser && <span className="text-[10px] bg-blue-500/20 px-2 py-0.5 rounded text-blue-400">🌐 Google連携中</span>}
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => {
+                                            alert("この機能は現在準備中です。");
+                                        }}
+                                        className="bg-white text-black text-[10px] font-black px-4 py-2 rounded-full hover:bg-gray-200 transition-all active:scale-95"
+                                    >
+                                        連携する
+                                    </button>
+                                </div>
+                            </div>
+                        </section>
+
+                        <button
+                            onClick={() => setShowAccountDeleteConfirm(true)}
+                            className="w-full bg-red-900/10 border border-red-900/20 text-red-500 font-bold py-4 rounded-xl hover:bg-red-900/20 transition-all text-sm"
+                        >
+                            アカウントの削除
+                        </button>
+                    </div>
+                </div>
+
+                {showAccountDeleteConfirm && (
+                    <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[110] flex items-center justify-center p-6 animate-in fade-in duration-300">
+                        <div className="w-full max-w-xs bg-[#1a1a1a] border border-red-900/30 rounded-3xl p-8 shadow-2xl animate-in zoom-in-95 duration-300">
+                            <div className="w-16 h-16 bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                                <span className="text-3xl">⚠️</span>
+                            </div>
+                            <h3 className="text-lg font-bold text-center mb-2 text-white">アカウント削除の確認</h3>
+                            <p className="text-gray-400 text-sm text-center mb-8 leading-relaxed">
+                                アカウントを削除すると、すべての記録が完全に消去され、復元することはできません。本当に削除しますか？
+                            </p>
+                            <div className="flex flex-col space-y-3">
+                                <button
+                                    onClick={handleDeleteAccount}
+                                    disabled={isSubmitting}
+                                    className="w-full bg-red-600 text-white font-bold py-3.5 rounded-2xl active:scale-95 transition-all shadow-lg"
+                                >
+                                    {isSubmitting ? "削除中..." : "完全に削除する"}
+                                </button>
+                                <button
+                                    onClick={() => setShowAccountDeleteConfirm(false)}
+                                    disabled={isSubmitting}
+                                    className="w-full bg-[#252525] text-gray-300 font-bold py-3.5 rounded-2xl active:scale-95 transition-all"
+                                >
+                                    キャンセル
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </main>
+        );
+    }
+
+    if (showLoginEdit) {
+        return (
+            <main className="min-h-screen bg-[#121212] text-white p-6 flex flex-col items-center">
+                <div className="w-full max-w-md">
+                    <header className="flex items-center mb-8">
+                        <button
+                            onClick={() => setShowLoginEdit(false)}
+                            className="mr-3 p-2 hover:bg-white/10 rounded-full transition-colors"
+                        >
+                            ←
+                        </button>
+                        <h2 className="text-xl font-bold">メール・パスワード変更</h2>
+                    </header>
+
+                    <form onSubmit={handleUpdateLoginInfo} className="space-y-6">
+                        <div className="bg-[#1a1a1a] rounded-2xl border border-gray-800 p-6 space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">現在のパスワード（必須）</label>
+                                <input
+                                    required
+                                    type="password"
+                                    className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
+                                    value={emailForm.currentPassword}
+                                    onChange={(e) => setEmailForm({ ...emailForm, currentPassword: e.target.value })}
+                                />
+                            </div>
+                            <div className="pt-4 border-t border-gray-800">
+                                <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">新しいメールアドレス</label>
+                                <input
+                                    type="email"
+                                    placeholder={user?.email || ""}
+                                    className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
+                                    value={emailForm.newEmail}
+                                    onChange={(e) => setEmailForm({ ...emailForm, newEmail: e.target.value })}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">新しいパスワード</label>
+                                <input
+                                    type="password"
+                                    className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
+                                    value={emailForm.newPassword}
+                                    onChange={(e) => setEmailForm({ ...emailForm, newPassword: e.target.value })}
+                                />
+                            </div>
+                        </div>
+
+                        <button
+                            type="submit"
+                            disabled={isSubmitting}
+                            className={`w-full font-bold py-4 rounded-xl shadow-lg transition-all active:scale-95 ${isSubmitting
+                                ? "bg-gray-700 text-gray-400"
+                                : "bg-white text-black hover:bg-gray-100"
+                                }`}
+                        >
+                            {isSubmitting ? "更新中..." : "変更を保存する"}
+                        </button>
+                    </form>
+                </div>
+            </main>
+        );
+    }
     return (
         <main className="min-h-screen bg-[#121212] text-white p-6">
             <div className="max-w-md mx-auto">
@@ -1437,14 +1656,6 @@ export default function Home() {
                         <div className="bg-[#1a1a1a] rounded-2xl border border-gray-800 overflow-hidden">
                             <SettingsItem label="アカウント設定" onClick={() => setShowProfileDisplay(true)} />
                             <SettingsItem label="ログイン情報" onClick={() => setShowLoginDisplay(true)} />
-                            <SettingsItem
-                                label="タイム記入"
-                                onClick={() => {
-                                    setEditingTime(null);
-                                    setTimeForm({ stroke: "", distance: "", time: "" });
-                                    setShowTimeInput(true);
-                                }}
-                            />
                             <SettingsItem label="通知" locked onClick={() => { }} />
                             <SettingsItem label="このアプリについて" onClick={() => setShowAbout(true)} />
                             <SettingsItem
@@ -1465,6 +1676,33 @@ export default function Home() {
                     </div>
                 )}
             </div>
+
+            {showDeleteConfirm && (
+                <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
+                    <div className="w-full max-w-xs bg-[#1a1a1a] border border-gray-800 rounded-3xl p-8 shadow-2xl animate-in zoom-in-95 duration-300">
+                        <h3 className="text-lg font-bold text-center mb-2 text-white">削除の確認</h3>
+                        <p className="text-gray-400 text-sm text-center mb-8">
+                            このタイムを削除してもよろしいですか？
+                        </p>
+                        <div className="flex flex-col space-y-3">
+                            <button
+                                onClick={confirmDelete}
+                                disabled={isSubmitting}
+                                className="w-full bg-red-600 text-white font-bold py-3.5 rounded-2xl active:scale-95 transition-all shadow-lg shadow-red-900/20"
+                            >
+                                {isSubmitting ? "削除中..." : "削除する"}
+                            </button>
+                            <button
+                                onClick={() => setShowDeleteConfirm(false)}
+                                disabled={isSubmitting}
+                                className="w-full bg-[#252525] text-gray-300 font-bold py-3.5 rounded-2xl active:scale-95 transition-all"
+                            >
+                                キャンセル
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </main>
     );
 }
