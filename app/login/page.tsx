@@ -48,6 +48,27 @@ export default function LoginPage() {
         checkRedirectResult();
     }, [router]);
 
+    // 認証メールのクリックを自動検知してリダイレクト
+    useEffect(() => {
+        let interval: NodeJS.Timeout;
+        const checkVerification = async () => {
+            const currentUser = auth.currentUser;
+            if (currentUser && !currentUser.emailVerified) {
+                try {
+                    await currentUser.reload();
+                    if (auth.currentUser?.emailVerified) {
+                        router.push("/");
+                    }
+                } catch (e) {
+                    console.error("Reload error:", e);
+                }
+            }
+        };
+
+        interval = setInterval(checkVerification, 3000); // 3秒ごとにチェック
+        return () => clearInterval(interval);
+    }, [router]);
+
     const handleAuth = async () => {
         setError("");
         setMessage("");
@@ -164,35 +185,6 @@ export default function LoginPage() {
         }
     };
 
-    const handleAppleAuth = async () => {
-        setError("");
-        setMessage("");
-        const provider = new OAuthProvider('apple.com');
-        try {
-            const result = await signInWithPopup(auth, provider);
-            const user = result.user;
-            await setDoc(doc(db, "users", user.uid), {
-                email: user.email,
-                lastLogin: serverTimestamp(),
-            }, { merge: true });
-            router.push("/");
-        } catch (e: any) {
-            console.error("Apple Auth Error:", e);
-            if (e.code === "auth/popup-blocked" || e.code === "auth/cancelled-popup-request") {
-                try {
-                    await signInWithRedirect(auth, provider);
-                } catch (re) {
-                    setError("Apple認証の開始に失敗しました。ブラウザの設定を確認してください。");
-                }
-            } else if (e.code === "auth/operation-not-allowed") {
-                setError("Apple認証が有効になっていません。Firebaseコンソールで有効にしてください。");
-            } else if (e.code === "auth/unauthorized-domain") {
-                setError("このドメイン（URL）はFirebaseで許可されていません。");
-            } else if (e.code !== "auth/popup-closed-by-user") {
-                setError(`Apple認証に失敗しました: ${e.code}`);
-            }
-        }
-    };
 
     const handleResendVerification = async () => {
         setError("");
@@ -289,15 +281,6 @@ export default function LoginPage() {
                         <span>Googleで{isLogin ? "ログイン" : "新規登録"}</span>
                     </button>
 
-                    <button
-                        onClick={handleAppleAuth}
-                        className="w-full py-3 px-4 bg-[#000000] hover:bg-[#1a1a1a] text-white font-semibold rounded-lg transition-all duration-200 flex items-center justify-center space-x-3 shadow-md active:scale-[0.98]"
-                    >
-                        <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
-                            <path d="M17.057 10.78c.038 1.956 1.705 2.613 1.734 2.628-.014.053-.266.924-.87 1.815-.526.772-1.077 1.543-1.933 1.558-.84.015-1.112-.51-2.07-.51-.958 0-1.258.495-2.054.525-.826.03-1.44-.825-1.973-1.589-1.096-1.575-1.935-4.44-1.012-6.046.458-.802 1.28-1.312 2.175-1.327.683-.015 1.334.465 1.755.465.42 0 1.208-.585 2.033-.502.345.015 1.312.135 1.935.953-.053.03-1.155.675-1.14 2.04M14.65 6.007c.36-.45.607-1.072.54-1.695-.532.022-1.177.36-1.552.81-.337.398-.637 1.035-.562 1.642.592.053 1.208-.307 1.574-.757z" />
-                        </svg>
-                        <span>Appleで{isLogin ? "ログイン" : "新規登録"}</span>
-                    </button>
 
                     <div className="relative flex items-center py-2">
                         <div className="flex-grow border-t border-gray-200 dark:border-gray-700"></div>

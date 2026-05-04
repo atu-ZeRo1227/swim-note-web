@@ -17,9 +17,11 @@ if (!firebaseConfig.apiKey) {
     console.error("Firebase API Key is missing. Check your .env.local file.");
 }
 
-// Initialize Firebase
+import { getStorage } from "firebase/storage";
+
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app);
 
-export { auth, db };
+export { auth, db, storage };
