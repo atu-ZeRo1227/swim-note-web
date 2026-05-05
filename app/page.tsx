@@ -72,7 +72,7 @@ export default function Home() {
     const [isEmailUnverified, setIsEmailUnverified] = useState(false);
 
     const [showSettings, setShowSettings] = useState(false);
-    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
 
     // Form states
     const [formData, setFormData] = useState<Profile>({
