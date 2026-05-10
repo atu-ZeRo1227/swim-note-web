@@ -218,7 +218,7 @@ export default function LoginPage() {
     return (
         <main className="flex min-h-screen flex-col items-center justify-center p-6 bg-[#121212] transition-colors duration-500">
             <div className="w-full max-w-md p-8 space-y-6 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-700">
-                <h1 className="text-3xl font-bold text-center text-gray-900 dark:text-white transition-all">
+                <h1 className="text-2xl font-bold text-center text-gray-900 dark:text-white transition-all">
                     {isLogin ? "ログイン" : "新規登録"}
                 </h1>
 

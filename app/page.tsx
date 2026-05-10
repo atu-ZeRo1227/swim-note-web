@@ -17,6 +17,7 @@ interface Profile {
     gender: string;
     iconUrl?: string;
     bio?: string;
+    headerUrl?: string;
 }
 
 interface DailyRecord {
@@ -83,6 +84,7 @@ export default function Home() {
         weight: "",
         gender: "",
         bio: "",
+        headerUrl: "",
     });
 
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -92,6 +94,9 @@ export default function Home() {
     const [showLoginEdit, setShowLoginEdit] = useState(false);
     const [showAccountEdit, setShowAccountEdit] = useState(false);
     const [showAbout, setShowAbout] = useState(false);
+    const [showNotifications, setShowNotifications] = useState(false);
+    const [hasDailyRecordToday, setHasDailyRecordToday] = useState(false);
+    const [showDailyReminder, setShowDailyReminder] = useState(false);
     const [showDailyInput, setShowDailyInput] = useState(false);
     const [showAIAnalysis, setShowAIAnalysis] = useState(false);
     const [showDailyHistory, setShowDailyHistory] = useState(false);
@@ -112,6 +117,8 @@ export default function Home() {
     const [menuInputMode, setMenuInputMode] = useState<"text" | "photo">("text");
     const [profilePhoto, setProfilePhoto] = useState<File | null>(null);
     const [profilePhotoPreview, setProfilePhotoPreview] = useState<string | null>(null);
+    const [headerPhoto, setHeaderPhoto] = useState<File | null>(null);
+    const [headerPhotoPreview, setHeaderPhotoPreview] = useState<string | null>(null);
 
     const [showTimeInput, setShowTimeInput] = useState(false);
     const [showTimeHistory, setShowTimeHistory] = useState(false);
@@ -148,6 +155,10 @@ export default function Home() {
     const [followRequests, setFollowRequests] = useState<any[]>([]);
     const [sentRequestUids, setSentRequestUids] = useState<string[]>([]);
     const [recommendedUsers, setRecommendedUsers] = useState<any[]>([]);
+    const [showFollowList, setShowFollowList] = useState<{ type: 'following' | 'followers', userId: string, nickname: string } | null>(null);
+    const [followListUsers, setFollowListUsers] = useState<any[]>([]);
+    const [myFollowerCount, setMyFollowerCount] = useState(0);
+    const [viewingUserStats, setViewingUserStats] = useState({ following: 0, followers: 0 });
     const [mutualFollows, setMutualFollows] = useState<string[]>([]);
 
     const [analysisResult, setAnalysisResult] = useState<AIAnalysisResult | null>(null);
@@ -190,6 +201,10 @@ export default function Home() {
                         setProfile(data);
                         setFormData(data); // Pre-fill form
                         setNeedsSetup(false);
+
+                        // Fetch follower count
+                        const followersSnap = await getDocs(query(collectionGroup(db, "following"), where("__name__", "==", currentUser.uid)));
+                        setMyFollowerCount(followersSnap.size);
                     } else {
                         setNeedsSetup(true);
                     }
@@ -279,6 +294,18 @@ export default function Home() {
         }
     };
 
+    const handleHeaderPhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            setHeaderPhoto(file);
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setHeaderPhotoPreview(reader.result as string);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
     const handleLogout = async () => {
         try {
             await signOut(auth);
@@ -302,9 +329,17 @@ export default function Home() {
                 iconUrl = await getDownloadURL(iconRef);
             }
 
+            let headerUrl = profile?.headerUrl || "";
+            if (headerPhoto) {
+                const headerRef = ref(storage, `users/${user.uid}/profile_header`);
+                await uploadBytes(headerRef, headerPhoto);
+                headerUrl = await getDownloadURL(headerRef);
+            }
+
             const profileData = {
                 ...formData,
                 iconUrl,
+                headerUrl,
                 updatedAt: serverTimestamp(),
             };
 
@@ -314,7 +349,7 @@ export default function Home() {
             console.log("Profile saved successfully to Firestore!");
 
             // 保存成功後に状態を更新
-            setProfile({ ...formData, iconUrl });
+            setProfile({ ...formData, iconUrl, headerUrl });
             setNeedsSetup(false);
             setShowProfileEdit(false);
             setShowAccountEdit(false);
@@ -416,6 +451,8 @@ export default function Home() {
             // ユニークなIDで保存して上書きを防止
             await setDoc(doc(db, "users", user.uid, "daily_records", uniqueId), recordData);
             console.log("Daily record saved!");
+            setHasDailyRecordToday(true);
+            setShowDailyReminder(false);
             setShowDailyInput(false);
             setShowAIAnalysis(false);
             setDailyForm({ duration: "", menu: "", insight: "" });
@@ -485,6 +522,8 @@ export default function Home() {
             // ユニークなIDで保存して上書きを防止
             await setDoc(doc(db, "users", user.uid, "daily_records", uniqueId), recordData);
             console.log("Daily record saved!");
+            setHasDailyRecordToday(true);
+            setShowDailyReminder(false);
             setShowDailyInput(false);
             setDailyForm({ duration: "", menu: "", insight: "" });
             setRating(0);
@@ -607,10 +646,45 @@ export default function Home() {
     const handleCommunityPhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
-            setCommunityPhoto(file);
+            // "Exactly right size" editing (Resizing to max 1080px width while maintaining quality)
             const reader = new FileReader();
-            reader.onloadend = () => {
-                setCommunityPhotoPreview(reader.result as string);
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    let width = img.width;
+                    let height = img.height;
+                    const maxSide = 1080;
+
+                    if (width > height) {
+                        if (width > maxSide) {
+                            height *= maxSide / width;
+                            width = maxSide;
+                        }
+                    } else {
+                        if (height > maxSide) {
+                            width *= maxSide / height;
+                            height = maxSide;
+                        }
+                    }
+
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx?.drawImage(img, 0, 0, width, height);
+                    
+                    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+                    setCommunityPhotoPreview(dataUrl);
+                    
+                    // Convert back to blob for Firebase upload
+                    canvas.toBlob((blob) => {
+                        if (blob) {
+                            const optimizedFile = new File([blob], file.name, { type: 'image/jpeg' });
+                            setCommunityPhoto(optimizedFile);
+                        }
+                    }, 'image/jpeg', 0.85);
+                };
+                img.src = event.target?.result as string;
             };
             reader.readAsDataURL(file);
         }
@@ -640,6 +714,26 @@ export default function Home() {
             setSearchResults(results);
         } catch (error) {
             console.error("Search error:", error);
+        }
+    };
+    const handleViewUserProfile = async (userId: string) => {
+        if (!userId) return;
+        try {
+            const userDoc = await getDoc(doc(db, "users", userId));
+            if (userDoc.exists()) {
+                setViewingUser({ id: userDoc.id, ...userDoc.data() });
+                
+                // Fetch stats
+                const followingSnap = await getDocs(collection(db, "users", userId, "following"));
+                // Query followers using the followedUid field
+                const followersSnap = await getDocs(query(collectionGroup(db, "following"), where("followedUid", "==", userId)));
+                setViewingUserStats({
+                    following: followingSnap.size,
+                    followers: followersSnap.size
+                });
+            }
+        } catch (error) {
+            console.error("Error fetching user profile:", error);
         }
     };
 
@@ -684,10 +778,18 @@ export default function Home() {
     const handleAcceptRequest = async (requesterUid: string) => {
         if (!user) return;
         try {
-            // Add to following of requester
-            await setDoc(doc(db, "users", requesterUid, "following", user.uid), { timestamp: serverTimestamp() });
-            // Add to following of user (mutual follow)
-            await setDoc(doc(db, "users", user.uid, "following", requesterUid), { timestamp: serverTimestamp() });
+            // Add to following of requester (requester follows user)
+            await setDoc(doc(db, "users", requesterUid, "following", user.uid), { 
+                timestamp: serverTimestamp(),
+                followedUid: user.uid,
+                followerUid: requesterUid
+            });
+            // Add to following of user (user follows requester - mutual follow)
+            await setDoc(doc(db, "users", user.uid, "following", requesterUid), { 
+                timestamp: serverTimestamp(),
+                followedUid: requesterUid,
+                followerUid: user.uid
+            });
             // Delete request
             await deleteDoc(doc(db, "users", user.uid, "follow_requests", requesterUid));
 
@@ -746,6 +848,39 @@ export default function Home() {
             setRecommendedUsers(recUsers);
         } catch (error) {
             console.error("Error fetching recommendations:", error);
+        }
+    };
+
+    const handleOpenFollowList = async (type: 'following' | 'followers', userId: string, nickname: string) => {
+        setFollowListUsers([]);
+        setShowFollowList({ type, userId, nickname });
+        try {
+            let uids: string[] = [];
+            if (type === 'following') {
+                const snap = await getDocs(collection(db, "users", userId, "following"));
+                uids = snap.docs.map(d => d.id);
+            } else {
+                // Followers: find everyone who has this userId in their following subcollection
+                // Note: collectionGroup requires an index and the 'followedUid' field.
+                try {
+                    const snap = await getDocs(query(collectionGroup(db, "following"), where("followedUid", "==", userId)));
+                    // snap.docs[i].ref.parent.parent.id is the follower
+                    uids = snap.docs.map(d => d.ref.parent.parent?.id).filter(Boolean) as string[];
+                } catch (e) {
+                    console.warn("Collection group query failed, falling back to allUsers", e);
+                    // Fallback: use allUsers if already fetched, or fetch a few
+                    // This is less efficient but safe if index is missing
+                    uids = allUsers.filter(u => u.following?.includes(userId)).map(u => u.id);
+                }
+            }
+
+            if (uids.length > 0) {
+                const userDocs = await Promise.all(uids.map(uid => getDoc(doc(db, "users", uid))));
+                const users = userDocs.filter(d => d.exists()).map(d => ({ id: d.id, ...d.data() }));
+                setFollowListUsers(users);
+            }
+        } catch (error) {
+            console.error("Error fetching follow list:", error);
         }
     };
 
@@ -1069,6 +1204,38 @@ export default function Home() {
         return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
     };
 
+    // Check for today's daily record
+    useEffect(() => {
+        const checkRecord = async () => {
+            if (!user) return;
+            try {
+                const today = new Date().toISOString().split('T')[0];
+                const q = query(collection(db, "users", user.uid, "daily_records"), where("date", "==", today));
+                const snap = await getDocs(q);
+                setHasDailyRecordToday(snap.size > 0);
+            } catch (error) {
+                console.error("Error checking today's record:", error);
+            }
+        };
+        checkRecord();
+    }, [user, showDailyInput]);
+
+    // Timer for 23:00 reminder
+    useEffect(() => {
+        const checkTime = () => {
+            const now = new Date();
+            if (now.getHours() >= 23 && !hasDailyRecordToday) {
+                setShowDailyReminder(true);
+            } else {
+                setShowDailyReminder(false);
+            }
+        };
+        
+        checkTime(); // Initial check
+        const timer = setInterval(checkTime, 60000); // Check every minute
+        return () => clearInterval(timer);
+    }, [hasDailyRecordToday]);
+
     const resetToHome = () => {
         setShowNewsList(false);
         setShowTimeInput(false);
@@ -1085,10 +1252,10 @@ export default function Home() {
         setShowCommunity(false);
         setShowFriends(false);
         setShowCommunityPostInput(false);
-        setNeedsSetup(false);
         setShowUserSearch(false);
         setShowRequestList(false);
         setViewingUser(null);
+        setShowNotifications(false);
         setIsEmailUnverified(false);
     };
 
@@ -1183,6 +1350,441 @@ export default function Home() {
                 <div className="flex min-h-screen items-center justify-center bg-[#121212]">
                     <div className="animate-spin h-8 w-8 border-4 border-white border-t-transparent rounded-full"></div>
                 </div>
+            );
+        }
+
+        // Other User Profile (takes precedence)
+        if (viewingUser) {
+            return (
+                <main className="min-h-screen bg-[#121212] flex flex-col animate-in fade-in duration-300">
+                    {/* Header Image */}
+                    <div 
+                        className={`h-40 relative shrink-0 ${!viewingUser.headerUrl ? 'bg-gradient-to-r from-purple-600 to-pink-600' : ''}`}
+                        style={viewingUser.headerUrl ? { backgroundImage: `url(${viewingUser.headerUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}}
+                    >
+                        <button
+                            onClick={() => setViewingUser(null)}
+                            className="absolute top-4 left-4 bg-black/40 hover:bg-black/60 text-white rounded-full p-2 backdrop-blur-sm transition-all z-20"
+                        >
+                            ←
+                        </button>
+                    </div>
+
+                    {/* Profile Content */}
+                    <div className="px-4 pb-8 relative -mt-12 max-w-2xl mx-auto w-full">
+                        <div className="flex justify-between items-end mb-4">
+                            <div className="w-24 h-24 rounded-full bg-gray-900 border-4 border-[#121212] overflow-hidden flex items-center justify-center shadow-2xl shrink-0">
+                                {viewingUser.iconUrl ? (
+                                    <img src={viewingUser.iconUrl} alt="Icon" className="w-full h-full object-cover" />
+                                ) : (
+                                    <span className="text-4xl text-gray-700">👤</span>
+                                )}
+                            </div>
+
+                            {viewingUser.id !== user?.uid && (
+                                <button
+                                    onClick={() => {
+                                        if (followingList.includes(viewingUser.id)) {
+                                            handleFollow(viewingUser.id);
+                                        } else {
+                                            handleSendFollowRequest(viewingUser.id);
+                                        }
+                                    }}
+                                    className={`px-6 py-2 rounded-full text-sm font-bold transition-all mb-2 ${followingList.includes(viewingUser.id)
+                                        ? "border border-gray-700 text-white hover:border-red-500 hover:text-red-500"
+                                        : "bg-white text-black hover:bg-gray-200"
+                                        }`}
+                                >
+                                    {followingList.includes(viewingUser.id)
+                                        ? "フォロー中"
+                                        : sentRequestUids.includes(viewingUser.id)
+                                            ? "送信済み"
+                                            : "フォローする"}
+                                </button>
+                            )}
+                        </div>
+
+                        <div className="space-y-1 mb-4">
+                            <h2 className="text-xl font-black">{viewingUser.nickname}</h2>
+                            <p className="text-gray-500 text-xs font-mono">ID: {viewingUser.id.slice(0, 8)}...</p>
+                        </div>
+
+                        {viewingUser.bio && (
+                            <p className="text-sm text-gray-300 leading-relaxed mb-4 whitespace-pre-wrap">{viewingUser.bio}</p>
+                        )}
+
+                        <div className="flex items-center space-x-6 text-sm text-gray-500 mb-6">
+                            <div className="flex items-center space-x-1">
+                                <span className="font-bold text-white">🏊</span>
+                                <span>{viewingUser.stroke || "未設定"}</span>
+                            </div>
+                            <button 
+                                onClick={() => handleOpenFollowList('following', viewingUser.id, viewingUser.nickname)}
+                                className="flex items-center space-x-1 hover:text-white transition-colors"
+                            >
+                                <span className="font-bold text-white">{viewingUserStats.following}</span>
+                                <span>フォロー中</span>
+                            </button>
+                            <button 
+                                onClick={() => handleOpenFollowList('followers', viewingUser.id, viewingUser.nickname)}
+                                className="flex items-center space-x-1 hover:text-white transition-colors"
+                            >
+                                <span className="font-bold text-white">{viewingUserStats.followers}</span>
+                                <span>フォロワー</span>
+                            </button>
+                        </div>
+
+                        {/* Tabs */}
+                        <div className="border-b border-gray-800 flex mb-4">
+                            <button className="px-4 py-3 text-sm font-bold border-b-2 border-purple-500 text-white">投稿</button>
+                        </div>
+
+                        {/* User's Posts Feed */}
+                        <div className="space-y-6">
+                            {(() => {
+                                const userPosts = communityPosts.filter(p => p.userId === viewingUser.id);
+                                return userPosts.length > 0 ? (
+                                    userPosts.map(post => (
+                                        <div key={post.id} className="bg-[#1a1a1a] rounded-3xl border border-gray-800 overflow-hidden shadow-xl animate-in fade-in duration-500">
+                                            <div className="p-6">
+                                                <div className="flex items-center space-x-3 mb-4">
+                                                    <div className="w-10 h-10 rounded-full bg-gray-800 shrink-0 overflow-hidden">
+                                                        {post.iconUrl ? <img src={post.iconUrl} className="w-full h-full object-cover" /> : <span className="flex items-center justify-center h-full text-white font-bold">{post.nickname.charAt(0)}</span>}
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center space-x-1">
+                                                            <span className="font-bold text-sm truncate">{post.nickname}</span>
+                                                            <span className="text-gray-600 text-[10px]">· {formatDate(post.date)}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {post.photoUrl && (
+                                                    <div className="mb-4 -mx-6 bg-black">
+                                                        <img src={post.photoUrl} className="w-full h-auto" />
+                                                    </div>
+                                                )}
+
+                                                <div className="space-y-4">
+                                                    <p className="text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">{post.text}</p>
+                                                    
+                                                    {/* Post Actions */}
+                                                    <div className="flex items-center justify-between pt-4 border-t border-gray-800/50">
+                                                        <div className="flex items-center space-x-6">
+                                                            <button
+                                                                onClick={() => handleToggleLike(post.id, post.userId)}
+                                                                className={`flex items-center space-x-2 group transition-all ${likesData[post.id]?.liked ? "text-pink-500" : "text-gray-500 hover:text-pink-400"}`}
+                                                            >
+                                                                <span className="text-xl">{likesData[post.id]?.liked ? "❤️" : "🤍"}</span>
+                                                                <span className="text-xs font-bold">{likesData[post.id]?.count || 0}</span>
+                                                            </button>
+
+                                                            <button
+                                                                onClick={() => setShowCommentsForPost(showCommentsForPost === post.id ? null : post.id)}
+                                                                className={`flex items-center space-x-2 group transition-all ${showCommentsForPost === post.id ? "text-blue-400" : "text-gray-500 hover:text-blue-300"}`}
+                                                            >
+                                                                <span className="text-xl">💬</span>
+                                                                <span className="text-xs font-bold">{commentsData[post.id]?.length || 0}</span>
+                                                            </button>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Comments Section */}
+                                                    {showCommentsForPost === post.id && (
+                                                        <div className="mt-6 space-y-4 animate-in slide-in-from-top-2 duration-300">
+                                                            <div className="max-h-60 overflow-y-auto space-y-3 pr-2 scrollbar-hide">
+                                                                {commentsData[post.id]?.length > 0 ? (
+                                                                    commentsData[post.id].map((comment: any) => (
+                                                                        <div key={comment.id} className="bg-black/30 p-3 rounded-2xl border border-gray-800/50">
+                                                                            <div className="flex justify-between items-center mb-1">
+                                                                                <button onClick={() => handleViewUserProfile(comment.userId)} className="text-[10px] font-bold text-gray-400 hover:text-white transition-colors">{comment.nickname}</button>
+                                                                                <span className="text-[8px] text-gray-600">{formatDate(comment.timestamp)}</span>
+                                                                            </div>
+                                                                            <p className="text-xs text-gray-200">{comment.text}</p>
+                                                                        </div>
+                                                                    ))
+                                                                ) : (
+                                                                    <p className="text-center text-[10px] text-gray-600 py-2 italic">最初のコメントを投稿しましょう</p>
+                                                                )}
+                                                            </div>
+                                                            <div className="flex items-center space-x-2 pt-2">
+                                                                <input
+                                                                    type="text"
+                                                                    placeholder="コメントを追加..."
+                                                                    className="flex-1 bg-black/50 border border-gray-800 rounded-full px-4 py-2 text-xs focus:ring-1 focus:ring-white outline-none transition-all"
+                                                                    value={newComment}
+                                                                    onChange={(e) => setNewComment(e.target.value)}
+                                                                    onKeyPress={(e) => e.key === 'Enter' && handleAddComment(post.id, post.userId)}
+                                                                />
+                                                                <button
+                                                                    onClick={() => handleAddComment(post.id, post.userId)}
+                                                                    disabled={!newComment.trim()}
+                                                                    className="w-8 h-8 bg-white text-black rounded-full flex items-center justify-center text-xs"
+                                                                >➔</button>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))
+                                ) : (
+                                    <div className="text-center py-10 text-gray-500 text-sm italic">
+                                        まだ投稿がありません
+                                    </div>
+                                );
+                            })()}
+                        </div>
+                    </div>
+                </main>
+            );
+        }
+
+        // Notifications Screen
+        if (showNotifications) {
+            return (
+                <main className="min-h-screen bg-[#121212] text-white p-6 flex flex-col items-center">
+                    <div className="w-full max-w-md animate-in fade-in slide-in-from-bottom-4 duration-500">
+                        <header className="mb-8 flex items-center justify-between">
+                            <h2 className="text-2xl font-bold tracking-tight">通知</h2>
+                            <button
+                                onClick={fetchFollowRequests}
+                                className="p-2 bg-white/5 border border-gray-800 rounded-full hover:bg-white/10 transition-all text-sm"
+                                title="更新"
+                            >
+                                🔄
+                            </button>
+                        </header>
+
+                        <div className="space-y-8">
+                            {/* System Reminders */}
+                            {showDailyReminder && (
+                                <section className="animate-in zoom-in duration-500">
+                                    <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] mb-4 ml-1">システム通知</h3>
+                                    <div className="bg-blue-500/10 border border-blue-500/30 p-5 rounded-3xl flex items-center space-x-4 shadow-lg shadow-blue-500/5">
+                                        <div className="w-12 h-12 bg-blue-500/20 rounded-2xl flex items-center justify-center text-2xl">
+                                            📝
+                                        </div>
+                                        <div className="flex-1">
+                                            <p className="text-sm font-bold text-blue-400">今日の記録を残しましょう！！</p>
+                                            <p className="text-[10px] text-blue-400/60 mt-1 leading-relaxed">
+                                                23:00を過ぎています。今日の泳ぎを振り返り、練習の成果を記録しましょう。
+                                            </p>
+                                        </div>
+                                        <button
+                                            onClick={() => { resetToHome(); setShowDailyInput(true); }}
+                                            className="bg-blue-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl hover:bg-blue-400 transition-all active:scale-95 whitespace-nowrap"
+                                        >
+                                            記録する
+                                        </button>
+                                    </div>
+                                </section>
+                            )}
+
+                            {/* Follow Requests Section */}
+                            <section>
+                                <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] mb-4 ml-1 flex items-center">
+                                    フォローリクエスト
+                                    {followRequests.length > 0 && (
+                                        <span className="ml-2 bg-red-500 text-white text-[8px] px-1.5 rounded-full animate-pulse">{followRequests.length}</span>
+                                    )}
+                                </h3>
+                                <div className="space-y-3">
+                                    {followRequests.length > 0 ? (
+                                        followRequests.map(u => (
+                                            <div key={u.id} className="bg-[#1a1a1a] p-4 rounded-2xl border border-gray-800 flex justify-between items-center group">
+                                                <div onClick={() => handleViewUserProfile(u.id)} className="flex items-center space-x-3 cursor-pointer hover:opacity-70 transition-all">
+                                                    <div className="w-10 h-10 rounded-full bg-gray-800 overflow-hidden flex items-center justify-center">
+                                                        {u.iconUrl ? <img src={u.iconUrl} className="w-full h-full object-cover" /> : <span>👤</span>}
+                                                    </div>
+                                                    <span className="font-bold text-sm text-white/90">{u.nickname}</span>
+                                                </div>
+                                                <div className="flex space-x-2">
+                                                    <button
+                                                        onClick={() => handleAcceptRequest(u.id)}
+                                                        className="bg-white text-black px-4 py-1.5 rounded-lg text-xs font-bold hover:bg-gray-200 transition-all active:scale-95"
+                                                    >
+                                                        承認
+                                                    </button>
+                                                    <button
+                                                        onClick={async () => {
+                                                            if (!user) return;
+                                                            await deleteDoc(doc(db, "users", user.uid, "follow_requests", u.id));
+                                                            fetchFollowRequests();
+                                                        }}
+                                                        className="bg-white/5 text-gray-500 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-white/10 transition-all"
+                                                    >
+                                                        拒否
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <div className="py-8 text-center text-[10px] text-gray-600 bg-[#1a1a1a] rounded-2xl border border-gray-800 border-dashed italic">
+                                            新しいリクエストはありません
+                                        </div>
+                                    )}
+                                </div>
+                            </section>
+
+                            {/* Interactions Section (Placeholder) */}
+                            <section>
+                                <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] mb-4 ml-1">アクティビティ</h3>
+                                <div className="bg-[#1a1a1a] rounded-3xl border border-gray-800 p-12 flex flex-col items-center justify-center text-center">
+                                    <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center text-3xl mb-4 opacity-20">
+                                        💬
+                                    </div>
+                                    <p className="text-xs text-gray-600 italic leading-relaxed">
+                                        いいねやコメントの通知は<br />
+                                        現在準備中です
+                                    </p>
+                                </div>
+                            </section>
+                        </div>
+                    </div>
+                </main>
+            );
+        }
+
+        // Profile Setup / Edit Form
+        if (needsSetup || (showProfileEdit && user)) {
+            return (
+                <main className="min-h-screen bg-[#121212] text-white p-6 flex items-start justify-center overflow-y-auto pt-12 md:items-center md:pt-6">
+                    <div className="w-full max-w-md bg-[#1a1a1a] p-8 rounded-2xl border border-gray-800 shadow-2xl relative mb-12">
+                        {!needsSetup && (
+                            <button
+                                onClick={() => setShowProfileEdit(false)}
+                                className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors"
+                            >
+                                ✕
+                            </button>
+                        )}
+                        <h2 className="text-2xl font-bold mb-6 text-center tracking-tight">
+                            {needsSetup ? "初期設定" : "プロフィール編集"}
+                        </h2>
+                        <form onSubmit={handleProfileSubmit} className="space-y-4">
+                            {/* Header Upload */}
+                            <div className="flex flex-col items-center mb-6">
+                                <label className="relative cursor-pointer group w-full">
+                                    <div className="w-full h-32 bg-gray-900 border-2 border-gray-800 rounded-2xl overflow-hidden flex items-center justify-center transition-all group-hover:border-white/50 shadow-xl">
+                                        {headerPhotoPreview || formData.headerUrl ? (
+                                            <img src={headerPhotoPreview || formData.headerUrl} alt="Header Preview" className="w-full h-full object-cover" />
+                                        ) : (
+                                            <div className="text-gray-700 flex flex-col items-center">
+                                                <span className="text-3xl mb-1">🖼️</span>
+                                                <span className="text-[10px] font-black uppercase tracking-widest">背景画像を設定</span>
+                                            </div>
+                                        )}
+                                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <span className="text-white text-xs font-black uppercase tracking-widest">変更する</span>
+                                        </div>
+                                    </div>
+                                    <input type="file" accept="image/*" className="hidden" onChange={handleHeaderPhotoChange} />
+                                </label>
+                                <p className="text-[10px] text-gray-500 mt-2 font-black uppercase tracking-[0.2em]">プロフィール背景</p>
+                            </div>
+
+                            {/* Icon Upload */}
+                            <div className="flex flex-col items-center mb-6">
+                                <label className="relative cursor-pointer group">
+                                    <div className="w-24 h-24 rounded-full bg-gray-900 border-2 border-gray-800 overflow-hidden flex items-center justify-center transition-all group-hover:border-white/50 shadow-2xl">
+                                        {profilePhotoPreview || formData.iconUrl ? (
+                                            <img src={profilePhotoPreview || formData.iconUrl} alt="Icon Preview" className="w-full h-full object-cover" />
+                                        ) : (
+                                            <span className="text-4xl text-gray-700 group-hover:scale-110 transition-transform">👤</span>
+                                        )}
+                                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <span className="text-white text-[10px] font-black uppercase tracking-widest">変更</span>
+                                        </div>
+                                    </div>
+                                    <input type="file" accept="image/*" className="hidden" onChange={handleProfilePhotoChange} />
+                                </label>
+                                <p className="text-[10px] text-gray-500 mt-3 font-black uppercase tracking-[0.2em] ml-1">プロフィール写真</p>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">ニックネーム</label>
+                                <input
+                                    required
+                                    type="text"
+                                    className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
+                                    value={formData.nickname}
+                                    onChange={(e) => setFormData({ ...formData, nickname: e.target.value })}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">主な泳法</label>
+                                <select
+                                    required
+                                    className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
+                                    value={formData.stroke}
+                                    onChange={(e) => setFormData({ ...formData, stroke: e.target.value })}
+                                >
+                                    <option value="">選択してください</option>
+                                    <option value="free">Free</option>
+                                    <option value="back">背泳ぎ</option>
+                                    <option value="breast">平泳ぎ</option>
+                                    <option value="fly">バタフライ</option>
+                                    <option value="im">個人メドレー</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">自己紹介</label>
+                                <textarea
+                                    className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all min-h-[100px] resize-none"
+                                    value={formData.bio}
+                                    placeholder="自己紹介文を入力してください"
+                                    onChange={(e) => setFormData({ ...formData, bio: e.target.value })}
+                                />
+                            </div>
+
+                            {needsSetup && (
+                                <div className="pt-6 border-t border-gray-800 mt-6 space-y-4">
+                                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest text-center mb-4">以下の情報は後で設定から変更できます</p>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">年齢</label>
+                                            <input
+                                                required
+                                                type="number"
+                                                className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
+                                                value={formData.age}
+                                                onChange={(e) => setFormData({ ...formData, age: e.target.value })}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">性別</label>
+                                            <select
+                                                required
+                                                className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
+                                                value={formData.gender}
+                                                onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
+                                            >
+                                                <option value="">選択</option>
+                                                <option value="male">男性</option>
+                                                <option value="female">女性</option>
+                                                <option value="other">その他</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            <button
+                                type="submit"
+                                disabled={isSubmitting}
+                                className={`w-full font-bold py-3 rounded-lg mt-4 transition-all active:scale-95 ${isSubmitting
+                                    ? "bg-gray-600 text-gray-300 cursor-not-allowed"
+                                    : "bg-white text-black hover:bg-gray-200"
+                                    }`}
+                            >
+                                {isSubmitting ? "保存中..." : needsSetup ? "設定を完了する" : "保存する"}
+                            </button>
+                        </form>
+                    </div>
+                </main>
             );
         }
 
@@ -1800,7 +2402,7 @@ export default function Home() {
         // AI Analysis Screen
         if (showAIAnalysis && analysisResult) {
             return (
-                <main className="min-h-screen bg-[#121212] text-white p-6 flex flex-col items-center justify-center">
+                <main className="min-h-screen bg-[#121212] text-white p-6 flex items-start justify-center overflow-y-auto pt-12 md:items-center md:pt-6">
                     <div className="w-full max-w-md bg-[#1a1a1a] p-8 rounded-2xl border border-blue-900/40 shadow-2xl relative animate-in fade-in zoom-in duration-300">
                         <div className="flex items-center justify-center mb-6 space-x-2">
                             <span className="text-xl">🤖</span>
@@ -1856,78 +2458,176 @@ export default function Home() {
             );
         }
 
-        // Profile Display
+        // Profile Display (Twitter Style)
         if (showProfileDisplay && profile) {
+            const myPosts = communityPosts.filter(p => p.userId === user?.uid);
             return (
-                <main className="min-h-screen bg-[#121212] text-white p-6 flex items-center justify-center">
-                    <div className="w-full max-w-md bg-[#1a1a1a] p-8 rounded-2xl border border-gray-800 shadow-2xl relative animate-in fade-in zoom-in duration-300">
+                <main className="min-h-screen bg-[#121212] text-white flex flex-col">
+                    {/* Header Image */}
+                    <div 
+                        className={`h-40 relative shrink-0 ${!profile.headerUrl ? 'bg-gradient-to-r from-blue-600 to-purple-600' : ''}`}
+                        style={profile.headerUrl ? { backgroundImage: `url(${profile.headerUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}}
+                    >
                         <button
                             onClick={() => setShowProfileDisplay(false)}
-                            className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors p-2"
+                            className="absolute top-4 left-4 bg-black/40 hover:bg-black/60 text-white rounded-full p-2 backdrop-blur-sm transition-all z-20"
                         >
-                            ✕
+                            ←
                         </button>
-                        <h2 className="text-2xl font-bold mb-8 text-center tracking-tight">ユーザープロフィール</h2>
+                    </div>
 
-                        {/* Icon, Edit Button and UID */}
-                        <div className="flex items-center justify-center space-x-8 mb-12">
-                            <div className="w-24 h-24 rounded-full bg-gray-900 border-2 border-gray-800 overflow-hidden flex items-center justify-center shadow-2xl shrink-0">
+                    {/* Profile Content */}
+                    <div className="px-4 pb-8 relative -mt-12 max-w-2xl mx-auto w-full">
+                        <div className="flex justify-between items-end mb-4">
+                            <div className="w-24 h-24 rounded-full bg-gray-900 border-4 border-[#121212] overflow-hidden flex items-center justify-center shadow-2xl shrink-0">
                                 {profile.iconUrl ? (
-                                    <img src={profile.iconUrl} alt="User Icon" className="w-full h-full object-cover" />
+                                    <img src={profile.iconUrl} alt="Icon" className="w-full h-full object-cover" />
                                 ) : (
                                     <span className="text-4xl text-gray-700">👤</span>
                                 )}
                             </div>
-                            <div className="flex flex-col items-start space-y-3">
-                                <button
-                                    onClick={() => {
-                                        setShowProfileDisplay(false);
-                                        setShowProfileEdit(true);
-                                    }}
-                                    className="px-6 py-2.5 bg-white text-black rounded-xl text-xs font-black uppercase tracking-widest hover:bg-gray-200 transition-all active:scale-95 flex items-center space-x-2 shadow-xl"
-                                >
-                                    <span>✏️</span>
-                                    <span>編集する</span>
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        if (user?.uid) {
-                                            navigator.clipboard.writeText(user.uid);
-                                            alert("ユーザーIDをコピーしました！");
-                                        }
-                                    }}
-                                    className="group flex flex-col items-start space-y-0.5 hover:opacity-70 transition-all cursor-pointer"
-                                    title="タップしてコピー"
-                                >
-                                    <span className="text-[8px] font-black text-gray-600 uppercase tracking-widest ml-1">USER ID (Tap to Copy)</span>
-                                    <div className="bg-black/20 px-2 py-1 rounded-md border border-gray-800/50 flex items-center space-x-2">
-                                        <span className="text-[9px] font-mono text-gray-500 truncate max-w-[120px]">{user?.uid}</span>
-                                        <span className="text-[10px] grayscale group-hover:grayscale-0 transition-all">📋</span>
-                                    </div>
-                                </button>
-                            </div>
+                            <button
+                                onClick={() => {
+                                    setShowProfileDisplay(false);
+                                    setShowProfileEdit(true);
+                                }}
+                                className="px-6 py-2 border border-gray-700 hover:bg-white/5 rounded-full text-sm font-bold transition-all mb-2"
+                            >
+                                プロフィールを編集
+                            </button>
                         </div>
 
-                        <div className="space-y-4">
-                            <div className="bg-black/30 p-4 rounded-xl border border-gray-800">
-                                <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">ニックネーム</p>
-                                <p className="text-lg font-medium">{profile.nickname}</p>
-                            </div>
+                        <div className="space-y-1 mb-4">
+                            <h2 className="text-xl font-black">{profile.nickname}</h2>
+                            <p className="text-gray-500 text-xs font-mono">UID: {user?.uid.slice(0, 8)}...</p>
+                        </div>
 
-                            <div className="bg-black/30 p-4 rounded-xl border border-gray-800">
-                                <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">主な泳法</p>
-                                <p className="text-lg font-medium">
-                                    {profile.stroke === 'free' ? 'Free' :
-                                        profile.stroke === 'back' ? '背泳ぎ' :
-                                            profile.stroke === 'breast' ? '平泳ぎ' :
-                                                profile.stroke === 'fly' ? 'バタフライ' : '個人メドレー'}
-                                </p>
-                            </div>
+                        {profile.bio && (
+                            <p className="text-sm text-gray-300 leading-relaxed mb-4 whitespace-pre-wrap">{profile.bio}</p>
+                        )}
 
-                            <div className="bg-black/30 p-4 rounded-xl border border-gray-800">
-                                <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">自己紹介</p>
-                                <p className="text-sm leading-relaxed text-gray-300 whitespace-pre-wrap">{profile.bio || "自己紹介はまだありません"}</p>
+                        <div className="flex items-center space-x-6 text-sm text-gray-500 mb-6">
+                            <div className="flex items-center space-x-1">
+                                <span className="font-bold text-white">🏊</span>
+                                <span>{profile.stroke === 'free' ? 'Free' :
+                                    profile.stroke === 'back' ? '背泳ぎ' :
+                                        profile.stroke === 'breast' ? '平泳ぎ' :
+                                            profile.stroke === 'fly' ? 'バタフライ' : '個人メドレー'}</span>
                             </div>
+                            <button 
+                                onClick={() => handleOpenFollowList('following', user?.uid || '', profile.nickname)}
+                                className="flex items-center space-x-1 hover:text-white transition-colors"
+                            >
+                                <span className="font-bold text-white">{followingList.length}</span>
+                                <span>フォロー中</span>
+                            </button>
+                            <button 
+                                onClick={() => handleOpenFollowList('followers', user?.uid || '', profile.nickname)}
+                                className="flex items-center space-x-1 hover:text-white transition-colors"
+                            >
+                                <span className="font-bold text-white">{myFollowerCount}</span>
+                                <span>フォロワー</span>
+                            </button>
+                        </div>
+
+                        {/* Tabs */}
+                        <div className="border-b border-gray-800 flex mb-4">
+                            <button className="px-4 py-3 text-sm font-bold border-b-2 border-blue-500 text-white">投稿</button>
+                            <button className="px-4 py-3 text-sm font-bold text-gray-500 hover:bg-white/5 transition-colors">記録</button>
+                        </div>
+
+                        {/* User's Posts Feed */}
+                        <div className="space-y-6">
+                            {myPosts.length > 0 ? (
+                                myPosts.map(post => (
+                                    <div key={post.id} className="bg-[#1a1a1a] rounded-3xl border border-gray-800 overflow-hidden shadow-xl animate-in fade-in duration-500">
+                                        <div className="p-6">
+                                            <div className="flex items-center space-x-3 mb-4">
+                                                <div className="w-10 h-10 rounded-full bg-gray-800 shrink-0 overflow-hidden">
+                                                    {post.iconUrl ? <img src={post.iconUrl} className="w-full h-full object-cover" /> : <span className="flex items-center justify-center h-full text-white font-bold">{post.nickname.charAt(0)}</span>}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center space-x-1">
+                                                        <span className="font-bold text-sm truncate">{post.nickname}</span>
+                                                        <span className="text-gray-600 text-[10px]">· {formatDate(post.date)}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {post.photoUrl && (
+                                                <div className="mb-4 -mx-6 bg-black">
+                                                    <img src={post.photoUrl} className="w-full h-auto" />
+                                                </div>
+                                            )}
+
+                                            <div className="space-y-4">
+                                                <p className="text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">{post.text}</p>
+                                                
+                                                {/* Post Actions */}
+                                                <div className="flex items-center justify-between pt-4 border-t border-gray-800/50">
+                                                    <div className="flex items-center space-x-6">
+                                                        <button
+                                                            onClick={() => handleToggleLike(post.id, post.userId)}
+                                                            className={`flex items-center space-x-2 group transition-all ${likesData[post.id]?.liked ? "text-pink-500" : "text-gray-500 hover:text-pink-400"}`}
+                                                        >
+                                                            <span className="text-xl">{likesData[post.id]?.liked ? "❤️" : "🤍"}</span>
+                                                            <span className="text-xs font-bold">{likesData[post.id]?.count || 0}</span>
+                                                        </button>
+
+                                                        <button
+                                                            onClick={() => setShowCommentsForPost(showCommentsForPost === post.id ? null : post.id)}
+                                                            className={`flex items-center space-x-2 group transition-all ${showCommentsForPost === post.id ? "text-blue-400" : "text-gray-500 hover:text-blue-300"}`}
+                                                        >
+                                                            <span className="text-xl">💬</span>
+                                                            <span className="text-xs font-bold">{commentsData[post.id]?.length || 0}</span>
+                                                        </button>
+                                                    </div>
+                                                </div>
+
+                                                {/* Comments Section */}
+                                                {showCommentsForPost === post.id && (
+                                                    <div className="mt-6 space-y-4 animate-in slide-in-from-top-2 duration-300">
+                                                        <div className="max-h-60 overflow-y-auto space-y-3 pr-2 scrollbar-hide">
+                                                            {commentsData[post.id]?.length > 0 ? (
+                                                                commentsData[post.id].map((comment: any) => (
+                                                                    <div key={comment.id} className="bg-black/30 p-3 rounded-2xl border border-gray-800/50">
+                                                                        <div className="flex justify-between items-center mb-1">
+                                                                            <button onClick={() => setShowProfileDisplay(true)} className="text-[10px] font-bold text-gray-400 hover:text-white transition-colors">{comment.nickname}</button>
+                                                                            <span className="text-[8px] text-gray-600">{formatDate(comment.timestamp)}</span>
+                                                                        </div>
+                                                                        <p className="text-xs text-gray-200">{comment.text}</p>
+                                                                    </div>
+                                                                ))
+                                                            ) : (
+                                                                <p className="text-center text-[10px] text-gray-600 py-2 italic">最初のコメントを投稿しましょう</p>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex items-center space-x-2 pt-2">
+                                                            <input
+                                                                type="text"
+                                                                placeholder="コメントを追加..."
+                                                                className="flex-1 bg-black/50 border border-gray-800 rounded-full px-4 py-2 text-xs focus:ring-1 focus:ring-white outline-none transition-all"
+                                                                value={newComment}
+                                                                onChange={(e) => setNewComment(e.target.value)}
+                                                                onKeyPress={(e) => e.key === 'Enter' && handleAddComment(post.id, post.userId)}
+                                                            />
+                                                            <button
+                                                                onClick={() => handleAddComment(post.id, post.userId)}
+                                                                disabled={!newComment.trim()}
+                                                                className="w-8 h-8 bg-white text-black rounded-full flex items-center justify-center text-xs"
+                                                            >➔</button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="text-center py-10 text-gray-500 text-sm italic">
+                                    まだ投稿がありません
+                                </div>
+                            )}
                         </div>
                     </div>
                 </main>
@@ -1976,15 +2676,11 @@ export default function Home() {
         // Community Screen
         if (showCommunity) {
             const filteredPosts = communityPosts.filter(post => {
-                // Visibility check: Show if 'all' OR (if 'followers' and I am following author) OR (I am the author)
-                const isAuthor = post.userId === user?.uid;
-                const isFollowing = followingList.includes(post.userId);
-                const isVisibleBySetting = post.visibility === 'all' || (post.visibility === 'followers' && (isFollowing || isAuthor));
-
-                if (!isVisibleBySetting) return false;
-
-                if (communityTab === "all") return true;
-                return isFollowing;
+                if (communityTab === "all") {
+                    return post.visibility === 'all';
+                }
+                // Following tab: only show posts from people the user follows
+                return followingList.includes(post.userId);
             });
 
             return (
@@ -2024,7 +2720,10 @@ export default function Home() {
                                     <div key={post.id} className="bg-[#1a1a1a] rounded-3xl border border-gray-800 overflow-hidden shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-500">
                                         <div className="p-6">
                                             <div className="flex justify-between items-center mb-4">
-                                                <div className="flex items-center space-x-3">
+                                                 <button
+                                                    onClick={() => handleViewUserProfile(post.userId)}
+                                                    className="flex items-center space-x-3 hover:opacity-70 transition-opacity text-left"
+                                                >
                                                     <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold shadow-inner overflow-hidden">
                                                         {post.iconUrl ? (
                                                             <img src={post.iconUrl} alt="User Icon" className="w-full h-full object-cover" />
@@ -2043,16 +2742,16 @@ export default function Home() {
                                                             )}
                                                         </div>
                                                     </div>
-                                                </div>
+                                                </button>
                                             </div>
 
                                             {post.photoUrl && (
                                                 <div className="mb-4 -mx-6">
-                                                    <div className="aspect-[4/3] w-full bg-black/50 overflow-hidden">
+                                                    <div className="w-full bg-black/50 overflow-hidden">
                                                         <img
                                                             src={post.photoUrl}
                                                             alt="投稿写真"
-                                                            className="w-full h-full object-cover"
+                                                            className="w-full h-auto"
                                                             loading="lazy"
                                                         />
                                                     </div>
@@ -2105,7 +2804,12 @@ export default function Home() {
                                                                 commentsData[post.id].map((comment: any) => (
                                                                     <div key={comment.id} className="bg-black/30 p-3 rounded-2xl border border-gray-800/50">
                                                                         <div className="flex justify-between items-center mb-1">
-                                                                            <span className="text-[10px] font-bold text-gray-400">{comment.nickname}</span>
+                                                                            <button
+                                                                                onClick={() => handleViewUserProfile(comment.userId)}
+                                                                                className="text-[10px] font-bold text-gray-400 hover:text-white transition-colors"
+                                                                            >
+                                                                                {comment.nickname}
+                                                                            </button>
                                                                             <span className="text-[8px] text-gray-600">{formatDate(comment.timestamp)}</span>
                                                                         </div>
                                                                         <p className="text-xs text-gray-200">{comment.text}</p>
@@ -2114,7 +2818,7 @@ export default function Home() {
                                                             ) : (
                                                                 <p className="text-center text-[10px] text-gray-600 py-2 italic">最初のコメントを投稿しましょう</p>
                                                             )}
-                                                        </div>
+                                                         </div>
 
                                                         <div className="flex items-center space-x-2 pt-2">
                                                             <input
@@ -2292,7 +2996,7 @@ export default function Home() {
 
                                 <div className="space-y-3">
                                     {searchResults.map(u => (
-                                        <div key={u.id} onClick={() => setViewingUser(u)} className="bg-black/30 p-4 rounded-xl border border-gray-800 flex justify-between items-center cursor-pointer hover:bg-white/5 transition-all">
+                                        <div key={u.id} onClick={() => handleViewUserProfile(u.id)} className="bg-black/30 p-4 rounded-xl border border-gray-800 flex justify-between items-center cursor-pointer hover:bg-white/5 transition-all">
                                             <div className="flex items-center space-x-3">
                                                 <div className="w-10 h-10 rounded-full bg-gray-800 overflow-hidden flex items-center justify-center">
                                                     {u.iconUrl ? <img src={u.iconUrl} className="w-full h-full object-cover" /> : <span>👤</span>}
@@ -2321,7 +3025,13 @@ export default function Home() {
                                         {followRequests.length > 0 ? (
                                             followRequests.map(u => (
                                                 <div key={u.id} className="bg-white/5 p-4 rounded-2xl border border-gray-800 flex justify-between items-center">
-                                                    <div className="flex items-center space-x-3">
+                                                    <div
+                                                        onClick={() => {
+                                                            handleViewUserProfile(u.id);
+                                                            setShowRequestList(false);
+                                                        }}
+                                                        className="flex items-center space-x-3 cursor-pointer hover:opacity-70 transition-all"
+                                                    >
                                                         <div className="w-10 h-10 rounded-full bg-gray-800 overflow-hidden">
                                                             {u.iconUrl ? <img src={u.iconUrl} className="w-full h-full object-cover" /> : <div className="flex items-center justify-center h-full">👤</div>}
                                                         </div>
@@ -2363,7 +3073,7 @@ export default function Home() {
                             <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] mb-4 ml-1">フォロー中</h3>
                             <div className="space-y-3">
                                 {allUsers.filter(u => followingList.includes(u.id)).map((u) => (
-                                    <div key={u.id} onClick={() => setViewingUser(u)} className="bg-[#1a1a1a] p-4 rounded-2xl border border-gray-800 flex justify-between items-center transition-all hover:border-gray-700 cursor-pointer">
+                                    <div key={u.id} onClick={() => handleViewUserProfile(u.id)} className="bg-[#1a1a1a] p-4 rounded-2xl border border-gray-800 flex justify-between items-center transition-all hover:border-gray-700 cursor-pointer">
                                         <div className="flex items-center space-x-4">
                                             <div className="w-10 h-10 rounded-full bg-gray-800 flex items-center justify-center shadow-lg overflow-hidden">
                                                 {u.iconUrl ? <img src={u.iconUrl} className="w-full h-full object-cover" /> : <span>👤</span>}
@@ -2383,7 +3093,7 @@ export default function Home() {
                             <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] mb-4 ml-1">おすすめのユーザー</h3>
                             <div className="space-y-3">
                                 {recommendedUsers.map((u) => (
-                                    <div key={u.id} onClick={() => setViewingUser(u)} className="bg-[#1a1a1a] p-4 rounded-2xl border border-gray-800 flex justify-between items-center hover:border-gray-700 cursor-pointer transition-all">
+                                    <div key={u.id} onClick={() => handleViewUserProfile(u.id)} className="bg-[#1a1a1a] p-4 rounded-2xl border border-gray-800 flex justify-between items-center hover:border-gray-700 cursor-pointer transition-all">
                                         <div className="flex items-center space-x-4">
                                             <div className="w-10 h-10 rounded-full bg-gray-800 flex items-center justify-center overflow-hidden">
                                                 {u.iconUrl ? <img src={u.iconUrl} className="w-full h-full object-cover" /> : <span>👤</span>}
@@ -2397,70 +3107,6 @@ export default function Home() {
                         </section>
                     </div>
 
-                    {/* Floating Bell Icon (Notifications) */}
-                    <div className="fixed bottom-10 right-10 z-50">
-                        <button
-                            onClick={() => setShowRequestList(true)}
-                            className="w-14 h-14 bg-white text-black rounded-full shadow-2xl flex items-center justify-center text-2xl hover:scale-110 active:scale-95 transition-all relative"
-                        >
-                            🔔
-                            {followRequests.length > 0 && (
-                                <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center text-[10px] font-bold text-white border-2 border-[#121212]">
-                                    {followRequests.length}
-                                </span>
-                            )}
-                        </button>
-                    </div>
-
-                    {/* Other User Profile Modal */}
-                    {viewingUser && (
-                        <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
-                            <div className="w-full max-w-md bg-[#1a1a1a] border border-gray-800 rounded-3xl p-8 shadow-2xl relative animate-in zoom-in-95 duration-300">
-                                <button onClick={() => setViewingUser(null)} className="absolute top-4 right-4 text-gray-500 hover:text-white p-2">✕</button>
-
-                                <div className="flex flex-col items-center mb-8">
-                                    <div className="w-24 h-24 rounded-full bg-gray-800 border-2 border-gray-700 overflow-hidden flex items-center justify-center mb-4">
-                                        {viewingUser.iconUrl ? <img src={viewingUser.iconUrl} className="w-full h-full object-cover" /> : <span className="text-4xl">👤</span>}
-                                    </div>
-                                    <h2 className="text-xl font-bold">{viewingUser.nickname}</h2>
-                                    <p className="text-[10px] text-gray-500 font-mono mt-1">ID: {viewingUser.id}</p>
-                                </div>
-
-                                <div className="space-y-4 mb-8">
-                                    <div className="bg-black/30 p-4 rounded-xl border border-gray-800">
-                                        <p className="text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">主な泳法</p>
-                                        <p className="text-sm font-bold">{viewingUser.stroke || "未設定"}</p>
-                                    </div>
-                                    <div className="bg-black/30 p-4 rounded-xl border border-gray-800">
-                                        <p className="text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">自己紹介</p>
-                                        <p className="text-xs text-gray-300 leading-relaxed whitespace-pre-wrap">{viewingUser.bio || "自己紹介はありません"}</p>
-                                    </div>
-                                </div>
-
-                                <button
-                                    onClick={() => {
-                                        if (followingList.includes(viewingUser.id)) {
-                                            handleFollow(viewingUser.id); // Unfollow
-                                        } else {
-                                            handleSendFollowRequest(viewingUser.id);
-                                        }
-                                    }}
-                                    className={`w-full py-3.5 rounded-2xl font-black text-xs transition-all active:scale-95 ${followingList.includes(viewingUser.id)
-                                        ? "bg-gray-800 text-gray-400"
-                                        : sentRequestUids.includes(viewingUser.id)
-                                            ? "bg-gray-700 text-gray-400"
-                                            : "bg-white text-black shadow-lg"
-                                        }`}
-                                >
-                                    {followingList.includes(viewingUser.id)
-                                        ? "フォロー解除"
-                                        : sentRequestUids.includes(viewingUser.id)
-                                            ? "送信済み (タップで取消)"
-                                            : "フォローリクエストを送信"}
-                                </button>
-                            </div>
-                        </div>
-                    )}
                 </main>
             );
         }
@@ -2468,126 +3114,6 @@ export default function Home() {
         // Login Info Edit
 
 
-        // Profile Setup / Edit Form
-        if (needsSetup || (showProfileEdit && user)) {
-            return (
-                <main className="min-h-screen bg-[#121212] text-white p-6 flex items-center justify-center">
-                    <div className="w-full max-w-md bg-[#1a1a1a] p-8 rounded-2xl border border-gray-800 shadow-2xl relative">
-                        {!needsSetup && (
-                            <button
-                                onClick={() => setShowProfileEdit(false)}
-                                className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors"
-                            >
-                                ✕
-                            </button>
-                        )}
-                        <h2 className="text-2xl font-bold mb-6 text-center tracking-tight">
-                            {needsSetup ? "初期設定" : "プロフィール編集"}
-                        </h2>
-                        <form onSubmit={handleProfileSubmit} className="space-y-4">
-                            {/* Icon Upload */}
-                            <div className="flex flex-col items-center mb-6">
-                                <label className="relative cursor-pointer group">
-                                    <div className="w-24 h-24 rounded-full bg-gray-900 border-2 border-gray-800 overflow-hidden flex items-center justify-center transition-all group-hover:border-white/50 shadow-2xl">
-                                        {profilePhotoPreview || formData.iconUrl ? (
-                                            <img src={profilePhotoPreview || formData.iconUrl} alt="Icon Preview" className="w-full h-full object-cover" />
-                                        ) : (
-                                            <span className="text-4xl text-gray-700 group-hover:scale-110 transition-transform">👤</span>
-                                        )}
-                                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <span className="text-white text-[10px] font-black uppercase tracking-widest">変更</span>
-                                        </div>
-                                    </div>
-                                    <input type="file" accept="image/*" className="hidden" onChange={handleProfilePhotoChange} />
-                                </label>
-                                <p className="text-[10px] text-gray-500 mt-3 font-black uppercase tracking-[0.2em] ml-1">プロフィール写真</p>
-                            </div>
-
-                            <div>
-                                <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">ニックネーム</label>
-                                <input
-                                    required
-                                    type="text"
-                                    className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
-                                    value={formData.nickname}
-                                    onChange={(e) => setFormData({ ...formData, nickname: e.target.value })}
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">主な泳法</label>
-                                <select
-                                    required
-                                    className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
-                                    value={formData.stroke}
-                                    onChange={(e) => setFormData({ ...formData, stroke: e.target.value })}
-                                >
-                                    <option value="">選択してください</option>
-                                    <option value="free">Free</option>
-                                    <option value="back">背泳ぎ</option>
-                                    <option value="breast">平泳ぎ</option>
-                                    <option value="fly">バタフライ</option>
-                                    <option value="im">個人メドレー</option>
-                                </select>
-                            </div>
-
-                            <div>
-                                <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">自己紹介</label>
-                                <textarea
-                                    className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all min-h-[100px] resize-none"
-                                    value={formData.bio}
-                                    placeholder="自己紹介文を入力してください"
-                                    onChange={(e) => setFormData({ ...formData, bio: e.target.value })}
-                                />
-                            </div>
-
-                            {needsSetup && (
-                                <div className="pt-6 border-t border-gray-800 mt-6 space-y-4">
-                                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest text-center mb-4">以下の情報は後で設定から変更できます</p>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">年齢</label>
-                                            <input
-                                                required
-                                                type="number"
-                                                className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
-                                                value={formData.age}
-                                                onChange={(e) => setFormData({ ...formData, age: e.target.value })}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">性別</label>
-                                            <select
-                                                required
-                                                className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
-                                                value={formData.gender}
-                                                onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
-                                            >
-                                                <option value="">選択</option>
-                                                <option value="male">男性</option>
-                                                <option value="female">女性</option>
-                                                <option value="other">その他</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                            <button
-                                type="submit"
-                                disabled={isSubmitting}
-                                className={`w-full font-bold py-3 rounded-lg mt-4 transition-all active:scale-95 ${isSubmitting
-                                    ? "bg-gray-600 text-gray-300 cursor-not-allowed"
-                                    : "bg-white text-black hover:bg-gray-200"
-                                    }`}
-                            >
-                                {isSubmitting ? "保存中..." : needsSetup ? "設定を完了する" : "保存する"}
-                            </button>
-                        </form>
-                    </div>
-                </main>
-            );
-        }
 
         // Account Edit Form (Age, Gender, Stroke, etc.)
         if (showAccountEdit && user) {
@@ -2602,6 +3128,17 @@ export default function Home() {
                         </button>
                         <h2 className="text-2xl font-bold mb-6 text-center tracking-tight">アカウント詳細設定</h2>
                         <form onSubmit={handleProfileSubmit} className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">ニックネーム</label>
+                                <input
+                                    required
+                                    type="text"
+                                    className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
+                                    value={formData.nickname}
+                                    onChange={(e) => setFormData({ ...formData, nickname: e.target.value })}
+                                />
+                            </div>
+
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">年齢</label>
@@ -2673,6 +3210,16 @@ export default function Home() {
                                         onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
                                     />
                                 </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">自己紹介</label>
+                                <textarea
+                                    className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all min-h-[100px] resize-none"
+                                    value={formData.bio}
+                                    placeholder="自己紹介文を入力してください"
+                                    onChange={(e) => setFormData({ ...formData, bio: e.target.value })}
+                                />
                             </div>
 
                             <button
@@ -3055,8 +3602,11 @@ export default function Home() {
                     </div>
 
                     {profile && (
-                        <div className={`flex items-center mb-10 px-2 cursor-pointer hover:opacity-80 transition-opacity ${isSidebarCollapsed ? 'justify-center' : 'space-x-3'}`} onClick={() => { resetToHome(); setShowProfileDisplay(true); }}>
-                            <div className="w-10 h-10 rounded-full bg-gray-800 border border-gray-700 overflow-hidden flex items-center justify-center shadow-inner shrink-0">
+                        <button
+                            className={`flex items-center mb-10 px-2 cursor-pointer hover:opacity-80 transition-opacity w-full text-left ${isSidebarCollapsed ? 'justify-center' : 'space-x-3'}`}
+                            onClick={() => { resetToHome(); setShowProfileDisplay(true); }}
+                        >
+                            <div className="w-10 h-10 rounded-full bg-gray-900 border border-gray-700 overflow-hidden flex items-center justify-center shadow-inner shrink-0">
                                 {profile.iconUrl ? (
                                     <img src={profile.iconUrl} alt="Icon" className="w-full h-full object-cover" />
                                 ) : (
@@ -3075,7 +3625,7 @@ export default function Home() {
                                     </span>
                                 </div>
                             )}
-                        </div>
+                        </button>
                     )}
 
                     <nav className="flex-1 space-y-2">
@@ -3085,19 +3635,68 @@ export default function Home() {
                         <SidebarItem icon="🧘" title="ストレッチ" locked onClick={() => { }} isCollapsed={isSidebarCollapsed} />
                         <SidebarItem icon="🏊" title="泳法研究" locked onClick={() => { }} isCollapsed={isSidebarCollapsed} />
                         <SidebarItem icon="👥" title="コミュニティ" onClick={() => { resetToHome(); setShowCommunity(true); }} active={showCommunity} isCollapsed={isSidebarCollapsed} />
+                        <SidebarItem icon="🔔" title="通知" onClick={() => { resetToHome(); setShowNotifications(true); }} active={showNotifications} isCollapsed={isSidebarCollapsed} badge={followRequests.length + (showDailyReminder ? 1 : 0)} />
                         <SidebarItem icon="🤝" title="友達" onClick={() => { resetToHome(); setShowFriends(true); }} active={showFriends} isCollapsed={isSidebarCollapsed} />
+                        <SidebarItem icon="🏆" title="チーム" locked onClick={() => { }} isCollapsed={isSidebarCollapsed} />
                         <SidebarItem icon="⚙️" title="設定" onClick={() => { resetToHome(); setShowSettings(true); }} active={showSettings} isCollapsed={isSidebarCollapsed} />
                     </nav>
                 </div>
             </aside>
             <div className="flex-1 overflow-y-auto w-full relative">
                 {renderContent()}
+
+                {/* Follow List Modal */}
+                {showFollowList && (
+                    <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[200] flex items-center justify-center p-6 animate-in fade-in duration-300">
+                        <div className="w-full max-w-md bg-[#1a1a1a] border border-gray-800 rounded-3xl p-8 shadow-2xl relative max-h-[80vh] flex flex-col animate-in zoom-in-95 duration-300">
+                            <button onClick={() => setShowFollowList(null)} className="absolute top-4 right-4 text-gray-500 hover:text-white p-2">✕</button>
+                            <h3 className="text-xl font-bold mb-6 text-center">
+                                {showFollowList.nickname}さんの{showFollowList.type === 'following' ? 'フォロー中' : 'フォロワー'}
+                            </h3>
+
+                            <div className="flex-1 overflow-y-auto space-y-4 pr-2 scrollbar-hide">
+                                {followListUsers.length > 0 ? (
+                                    followListUsers.map(u => (
+                                        <div
+                                            key={u.id}
+                                            onClick={() => {
+                                                if (u.id === user?.uid) {
+                                                    setShowProfileDisplay(true);
+                                                } else {
+                                                    handleViewUserProfile(u.id);
+                                                }
+                                                setShowFollowList(null);
+                                            }}
+                                            className="flex items-center justify-between p-3 rounded-2xl bg-white/5 border border-gray-800/50 hover:bg-white/10 transition-all cursor-pointer group"
+                                        >
+                                            <div className="flex items-center space-x-3">
+                                                <div className="w-10 h-10 rounded-full bg-gray-800 overflow-hidden shrink-0">
+                                                    {u.iconUrl ? <img src={u.iconUrl} className="w-full h-full object-cover" /> : <div className="flex items-center justify-center h-full">👤</div>}
+                                                </div>
+                                                <div>
+                                                    <p className="font-bold text-sm text-white/90">{u.nickname}</p>
+                                                    <p className="text-[10px] text-gray-500">{u.stroke || "泳法未設定"}</p>
+                                                </div>
+                                            </div>
+                                            <span className="text-gray-700 group-hover:text-white transition-colors">→</span>
+                                        </div>
+                                    ))
+                                ) : (
+                                    <div className="flex flex-col items-center justify-center py-20 text-gray-600">
+                                        <span className="text-4xl mb-4">👥</span>
+                                        <p className="text-sm">リストは空です</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );
 }
 
-function SidebarItem({ icon, title, onClick, locked = false, active = false, isCollapsed = false }: { icon: string; title: string; onClick: () => void; locked?: boolean; active?: boolean; isCollapsed?: boolean }) {
+function SidebarItem({ icon, title, onClick, locked = false, active = false, isCollapsed = false, badge = 0 }: { icon: string; title: string; onClick: () => void; locked?: boolean; active?: boolean; isCollapsed?: boolean; badge?: number }) {
     return (
         <button
             onClick={locked ? undefined : onClick}
@@ -3108,7 +3707,12 @@ function SidebarItem({ icon, title, onClick, locked = false, active = false, isC
                 }`}
             title={isCollapsed ? title : undefined}
         >
-            <span className={`text-xl ${isCollapsed ? '' : 'mr-3'}`}>{locked ? "🔒" : icon}</span>
+            <span className={`text-xl ${isCollapsed ? '' : 'mr-3'} relative`}>
+                {locked ? "🔒" : icon}
+                {badge > 0 && (
+                    <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-[#1a1a1a]" />
+                )}
+            </span>
             {!isCollapsed && <span className="text-sm font-bold tracking-wider">{title}</span>}
         </button>
     );
