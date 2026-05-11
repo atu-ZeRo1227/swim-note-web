@@ -52,14 +52,20 @@ export default function LoginPage() {
     // LIFF Initialization and Auto Login
     useEffect(() => {
         const initLiff = async () => {
-            const liffId = process.env.NEXT_PUBLIC_LIFF_ID || "YOUR_LIFF_ID"; // placeholder
+            const liffId = process.env.NEXT_PUBLIC_LIFF_ID;
+            if (!liffId) {
+                console.error("LIFF ID is not defined in environment variables.");
+                return;
+            }
+
             try {
                 await liff.init({ liffId });
+                // LINEアプリ内ブラウザで開いている場合は、自動的にログイン処理を行う
                 if (liff.isInClient()) {
                     if (!liff.isLoggedIn()) {
                         liff.login();
                     } else {
-                        // Automatically sign in to Firebase if already logged in to LIFF
+                        // 既にLIFFにログイン済みの場合はFirebaseとも同期
                         await handleLiffFirebaseLogin();
                     }
                 }
