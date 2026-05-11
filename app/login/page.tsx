@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendEmailVerification, sendPasswordResetEmail, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, OAuthProvider } from "firebase/auth";
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendEmailVerification, sendPasswordResetEmail, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, OAuthProvider, signInWithCredential } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, setDoc, serverTimestamp, getDoc } from "firebase/firestore";
 import { useRouter } from "next/navigation";
+import liff from "@line/liff";
 
 export default function LoginPage() {
     const router = useRouter();
@@ -48,6 +49,58 @@ export default function LoginPage() {
         checkRedirectResult();
     }, [router]);
 
+    // LIFF Initialization and Auto Login
+    useEffect(() => {
+        const initLiff = async () => {
+            const liffId = process.env.NEXT_PUBLIC_LIFF_ID || "YOUR_LIFF_ID"; // placeholder
+            try {
+                await liff.init({ liffId });
+                if (liff.isInClient()) {
+                    if (!liff.isLoggedIn()) {
+                        liff.login();
+                    } else {
+                        // Automatically sign in to Firebase if already logged in to LIFF
+                        await handleLiffFirebaseLogin();
+                    }
+                }
+            } catch (err: any) {
+                console.error("LIFF Init Error:", err);
+            }
+        };
+        initLiff();
+    }, []);
+
+    const handleLiffFirebaseLogin = async () => {
+        const idToken = liff.getIDToken();
+        if (!idToken) return;
+
+        const provider = new OAuthProvider("oidc.line");
+        const credential = provider.credential({
+            idToken: idToken,
+        });
+
+        try {
+            const result = await signInWithCredential(auth, credential);
+            const user = result.user;
+            
+            // アカウント情報をFirestoreに保存/更新
+            await setDoc(doc(db, "users", user.uid), {
+                email: user.email || null,
+                lastLogin: serverTimestamp(),
+                lineUserId: liff.getContext()?.userId || null,
+            }, { merge: true });
+            
+            router.push("/");
+        } catch (e: any) {
+            console.error("Firebase LIFF Auth Error:", e);
+            if (e.code === "auth/account-exists-with-different-credential") {
+                setError("既に別の認証方法で登録されているメールアドレスです。");
+            } else {
+                setError("LINEログインに失敗しました。");
+            }
+        }
+    };
+
     // 認証メールのクリックを自動検知してリダイレクト
     useEffect(() => {
         let interval: NodeJS.Timeout;
@@ -57,6 +110,16 @@ export default function LoginPage() {
                 try {
                     await currentUser.reload();
                     if (auth.currentUser?.emailVerified) {
+                        // メール認証完了時に初めてFirestoreにドキュメントを作成する
+                        try {
+                            await setDoc(doc(db, "users", auth.currentUser.uid), {
+                                email: auth.currentUser.email,
+                                createdAt: serverTimestamp(),
+                                lastLogin: serverTimestamp(),
+                            }, { merge: true });
+                        } catch (fsError) {
+                            console.error("Firestore Error (Verification):", fsError);
+                        }
                         router.push("/");
                     }
                 } catch (e) {
@@ -79,7 +142,13 @@ export default function LoginPage() {
 
                 // 最終ログイン日時を更新 (失敗してもログインは継続)
                 try {
-                    await setDoc(doc(db, "users", userCredential.user.uid), {
+                    const user = userCredential.user;
+                    if (!user.emailVerified) {
+                        setError("メール認証が完了していません。メール内のリンクをクリックして認証を完了させてください。");
+                        return;
+                    }
+
+                    await setDoc(doc(db, "users", user.uid), {
                         lastLogin: serverTimestamp(),
                     }, { merge: true });
                 } catch (fsError) {
@@ -92,16 +161,7 @@ export default function LoginPage() {
                 // Sign up logic
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
 
-                // アカウント情報をFirestoreに保存 (失敗しても登録自体は進める)
-                try {
-                    await setDoc(doc(db, "users", userCredential.user.uid), {
-                        email: userCredential.user.email,
-                        createdAt: serverTimestamp(),
-                        lastLogin: serverTimestamp(),
-                    }, { merge: true });
-                } catch (fsError) {
-                    console.error("Firestore Error (Signup):", fsError);
-                }
+                // メール認証後にドキュメントを作成するため、ここでは作成しない
 
                 // Send verification email
                 await sendEmailVerification(userCredential.user);
@@ -188,12 +248,16 @@ export default function LoginPage() {
     const handleLineLogin = async () => {
         setError("");
         setMessage("");
-        const provider = new OAuthProvider("oidc.line");
+        
         try {
-            await signInWithRedirect(auth, provider);
+            if (!liff.isLoggedIn()) {
+                liff.login();
+                return;
+            }
+            await handleLiffFirebaseLogin();
         } catch (e: any) {
             console.error("LINE Auth Error:", e);
-            setError(`LINE認証の開始に失敗しました。FirebaseコンソールでOIDCプロバイダー（oidc.line）が正しく設定されているか確認してください。`);
+            setError(`LINE認証に失敗しました。`);
         }
     };
 

@@ -210,7 +210,7 @@ export default function Home() {
                     }
                 } catch (error) {
                     console.error("Firestore error:", error);
-                    if (isMounted) setNeedsSetup(true);
+                    // エラー時は強制的に初期設定画面を出さない（既存プロファイルがある可能性があるため）
                 } finally {
                     if (isMounted) setLoading(false);
                 }
@@ -1646,147 +1646,6 @@ export default function Home() {
             );
         }
 
-        // Profile Setup / Edit Form
-        if (needsSetup || (showProfileEdit && user)) {
-            return (
-                <main className="min-h-screen bg-[#121212] text-white p-6 flex items-start justify-center overflow-y-auto pt-12 md:items-center md:pt-6">
-                    <div className="w-full max-w-md bg-[#1a1a1a] p-8 rounded-2xl border border-gray-800 shadow-2xl relative mb-12">
-                        {!needsSetup && (
-                            <button
-                                onClick={() => setShowProfileEdit(false)}
-                                className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors"
-                            >
-                                ✕
-                            </button>
-                        )}
-                        <h2 className="text-2xl font-bold mb-6 text-center tracking-tight">
-                            {needsSetup ? "初期設定" : "プロフィール編集"}
-                        </h2>
-                        <form onSubmit={handleProfileSubmit} className="space-y-4">
-                            {/* Header Upload */}
-                            <div className="flex flex-col items-center mb-6">
-                                <label className="relative cursor-pointer group w-full">
-                                    <div className="w-full h-32 bg-gray-900 border-2 border-gray-800 rounded-2xl overflow-hidden flex items-center justify-center transition-all group-hover:border-white/50 shadow-xl">
-                                        {headerPhotoPreview || formData.headerUrl ? (
-                                            <img src={headerPhotoPreview || formData.headerUrl} alt="Header Preview" className="w-full h-full object-cover" />
-                                        ) : (
-                                            <div className="text-gray-700 flex flex-col items-center">
-                                                <span className="text-3xl mb-1">🖼️</span>
-                                                <span className="text-[10px] font-black uppercase tracking-widest">背景画像を設定</span>
-                                            </div>
-                                        )}
-                                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <span className="text-white text-xs font-black uppercase tracking-widest">変更する</span>
-                                        </div>
-                                    </div>
-                                    <input type="file" accept="image/*" className="hidden" onChange={handleHeaderPhotoChange} />
-                                </label>
-                                <p className="text-[10px] text-gray-500 mt-2 font-black uppercase tracking-[0.2em]">プロフィール背景</p>
-                            </div>
-
-                            {/* Icon Upload */}
-                            <div className="flex flex-col items-center mb-6">
-                                <label className="relative cursor-pointer group">
-                                    <div className="w-24 h-24 rounded-full bg-gray-900 border-2 border-gray-800 overflow-hidden flex items-center justify-center transition-all group-hover:border-white/50 shadow-2xl">
-                                        {profilePhotoPreview || formData.iconUrl ? (
-                                            <img src={profilePhotoPreview || formData.iconUrl} alt="Icon Preview" className="w-full h-full object-cover" />
-                                        ) : (
-                                            <span className="text-4xl text-gray-700 group-hover:scale-110 transition-transform">👤</span>
-                                        )}
-                                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <span className="text-white text-[10px] font-black uppercase tracking-widest">変更</span>
-                                        </div>
-                                    </div>
-                                    <input type="file" accept="image/*" className="hidden" onChange={handleProfilePhotoChange} />
-                                </label>
-                                <p className="text-[10px] text-gray-500 mt-3 font-black uppercase tracking-[0.2em] ml-1">プロフィール写真</p>
-                            </div>
-
-                            <div>
-                                <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">ニックネーム</label>
-                                <input
-                                    required
-                                    type="text"
-                                    className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
-                                    value={formData.nickname}
-                                    onChange={(e) => setFormData({ ...formData, nickname: e.target.value })}
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">主な泳法</label>
-                                <select
-                                    required
-                                    className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
-                                    value={formData.stroke}
-                                    onChange={(e) => setFormData({ ...formData, stroke: e.target.value })}
-                                >
-                                    <option value="">選択してください</option>
-                                    <option value="free">Free</option>
-                                    <option value="back">背泳ぎ</option>
-                                    <option value="breast">平泳ぎ</option>
-                                    <option value="fly">バタフライ</option>
-                                    <option value="im">個人メドレー</option>
-                                </select>
-                            </div>
-
-                            <div>
-                                <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">自己紹介</label>
-                                <textarea
-                                    className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all min-h-[100px] resize-none"
-                                    value={formData.bio}
-                                    placeholder="自己紹介文を入力してください"
-                                    onChange={(e) => setFormData({ ...formData, bio: e.target.value })}
-                                />
-                            </div>
-
-                            {needsSetup && (
-                                <div className="pt-6 border-t border-gray-800 mt-6 space-y-4">
-                                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest text-center mb-4">以下の情報は後で設定から変更できます</p>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">年齢</label>
-                                            <input
-                                                required
-                                                type="number"
-                                                className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
-                                                value={formData.age}
-                                                onChange={(e) => setFormData({ ...formData, age: e.target.value })}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">性別</label>
-                                            <select
-                                                required
-                                                className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
-                                                value={formData.gender}
-                                                onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
-                                            >
-                                                <option value="">選択</option>
-                                                <option value="male">男性</option>
-                                                <option value="female">女性</option>
-                                                <option value="other">その他</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                            <button
-                                type="submit"
-                                disabled={isSubmitting}
-                                className={`w-full font-bold py-3 rounded-lg mt-4 transition-all active:scale-95 ${isSubmitting
-                                    ? "bg-gray-600 text-gray-300 cursor-not-allowed"
-                                    : "bg-white text-black hover:bg-gray-200"
-                                    }`}
-                            >
-                                {isSubmitting ? "保存中..." : needsSetup ? "設定を完了する" : "保存する"}
-                            </button>
-                        </form>
-                    </div>
-                </main>
-            );
-        }
 
         // Time Input Form
         if (showTimeInput) {
@@ -2045,17 +1904,6 @@ export default function Home() {
                                 <span className="text-xs font-mono text-gray-500 bg-gray-800/50 px-2 py-1 rounded">1.0.0</span>
                             </div>
 
-                            <div className="bg-black/30 p-5 rounded-xl border border-gray-800">
-                                <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">お問い合わせ・ご要望</p>
-                                <a
-                                    href="https://docs.google.com/forms/d/e/1FAIpQLSfie7XIFqEGEoErUAwMunNBZthBhXa1vLrpfoad013T4D38HA/viewform"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-sm text-blue-400 hover:text-blue-300 transition-colors underline break-all leading-relaxed block"
-                                >
-                                    https://docs.google.com/forms/d/e/1FAIpQLSfie7XIFqEGEoErUAwMunNBZthBhXa1vLrp...
-                                </a>
-                            </div>
                         </div>
 
                         <button
@@ -3405,6 +3253,148 @@ export default function Home() {
                 </main>
             );
         }
+ 
+        // Profile Setup / Edit Form (優先度を下げ、Home画面の代わりとして表示)
+        if (needsSetup || (showProfileEdit && user)) {
+            return (
+                <main className="min-h-screen bg-[#121212] text-white p-6 flex items-start justify-center overflow-y-auto pt-12 md:items-center md:pt-6">
+                    <div className="w-full max-w-md bg-[#1a1a1a] p-8 rounded-2xl border border-gray-800 shadow-2xl relative mb-12">
+                        <button
+                            onClick={() => {
+                                setNeedsSetup(false);
+                                setShowProfileEdit(false);
+                            }}
+                            className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors p-2"
+                        >
+                            ✕
+                        </button>
+                        <h2 className="text-2xl font-bold mb-6 text-center tracking-tight">
+                            {needsSetup ? "初期設定" : "プロフィール編集"}
+                        </h2>
+                        <form onSubmit={handleProfileSubmit} className="space-y-4">
+                            <div className="flex flex-col items-center mb-6">
+                                <label className="relative cursor-pointer group w-full">
+                                    <div className="w-full h-32 bg-gray-900 border-2 border-gray-800 rounded-2xl overflow-hidden flex items-center justify-center transition-all group-hover:border-white/50 shadow-xl">
+                                        {headerPhotoPreview || formData.headerUrl ? (
+                                            <img src={headerPhotoPreview || formData.headerUrl} alt="Header Preview" className="w-full h-full object-cover" />
+                                        ) : (
+                                            <div className="text-gray-700 flex flex-col items-center">
+                                                <span className="text-3xl mb-1">🖼️</span>
+                                                <span className="text-[10px] font-black uppercase tracking-widest">背景画像を設定</span>
+                                            </div>
+                                        )}
+                                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <span className="text-white text-xs font-black uppercase tracking-widest">変更する</span>
+                                        </div>
+                                    </div>
+                                    <input type="file" accept="image/*" className="hidden" onChange={handleHeaderPhotoChange} />
+                                </label>
+                                <p className="text-[10px] text-gray-500 mt-2 font-black uppercase tracking-[0.2em]">プロフィール背景</p>
+                            </div>
+
+                            <div className="flex flex-col items-center mb-6">
+                                <label className="relative cursor-pointer group">
+                                    <div className="w-24 h-24 rounded-full bg-gray-900 border-2 border-gray-800 overflow-hidden flex items-center justify-center transition-all group-hover:border-white/50 shadow-2xl">
+                                        {profilePhotoPreview || formData.iconUrl ? (
+                                            <img src={profilePhotoPreview || formData.iconUrl} alt="Icon Preview" className="w-full h-full object-cover" />
+                                        ) : (
+                                            <span className="text-4xl text-gray-700 group-hover:scale-110 transition-transform">👤</span>
+                                        )}
+                                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <span className="text-white text-[10px] font-black uppercase tracking-widest">変更</span>
+                                        </div>
+                                    </div>
+                                    <input type="file" accept="image/*" className="hidden" onChange={handleProfilePhotoChange} />
+                                </label>
+                                <p className="text-[10px] text-gray-500 mt-3 font-black uppercase tracking-[0.2em] ml-1">プロフィール写真</p>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">ニックネーム</label>
+                                <input
+                                    required
+                                    type="text"
+                                    className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
+                                    value={formData.nickname}
+                                    onChange={(e) => setFormData({ ...formData, nickname: e.target.value })}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">主な泳法</label>
+                                <select
+                                    required
+                                    className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
+                                    value={formData.stroke}
+                                    onChange={(e) => setFormData({ ...formData, stroke: e.target.value })}
+                                >
+                                    <option value="">選択してください</option>
+                                    <option value="free">Free</option>
+                                    <option value="back">背泳ぎ</option>
+                                    <option value="breast">平泳ぎ</option>
+                                    <option value="fly">バタフライ</option>
+                                    <option value="im">個人メドレー</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">自己紹介</label>
+                                <textarea
+                                    className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all min-h-[100px] resize-none"
+                                    value={formData.bio}
+                                    placeholder="自己紹介文を入力してください"
+                                    onChange={(e) => setFormData({ ...formData, bio: e.target.value })}
+                                />
+                            </div>
+
+                            {needsSetup && (
+                                <div className="pt-6 border-t border-gray-800 mt-6 space-y-4">
+                                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest text-center mb-4">以下の情報は後で設定から変更できます</p>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">年齢</label>
+                                            <input
+                                                required
+                                                type="number"
+                                                className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
+                                                value={formData.age}
+                                                onChange={(e) => setFormData({ ...formData, age: e.target.value })}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">性別</label>
+                                            <select
+                                                required
+                                                className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
+                                                value={formData.gender}
+                                                onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
+                                            >
+                                                <option value="">選択</option>
+                                                <option value="male">男性</option>
+                                                <option value="female">女性</option>
+                                                <option value="other">その他</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            <button
+                                type="submit"
+                                disabled={isSubmitting}
+                                className={`w-full font-bold py-3 rounded-lg mt-4 transition-all active:scale-95 ${isSubmitting
+                                    ? "bg-gray-600 text-gray-300 cursor-not-allowed"
+                                    : "bg-white text-black hover:bg-gray-200"
+                                    }`}
+                            >
+                                {isSubmitting ? "保存中..." : needsSetup ? "設定を完了する" : "保存する"}
+                            </button>
+                        </form>
+                    </div>
+                </main>
+            );
+        }
+ 
         return (
             <main className="min-h-screen bg-[#121212] text-white p-6">
                 <div className="max-w-md mx-auto">
@@ -3436,6 +3426,10 @@ export default function Home() {
                                 <SettingsItem label="ログイン情報" onClick={() => setShowLoginDisplay(true)} />
                                 <SettingsItem label="通知" locked onClick={() => { }} />
                                 <SettingsItem label="このアプリについて" onClick={() => setShowAbout(true)} />
+                                <SettingsItem
+                                    label="お問い合わせ・ご要望"
+                                    onClick={() => window.open("https://docs.google.com/forms/d/e/1FAIpQLSfie7XIFqEGEoErUAwMunNBZthBhXa1vLrpfoad013T4D38HA/viewform", "_blank")}
+                                />
                                 <SettingsItem
                                     label="ログアウト"
                                     destructive
@@ -3583,7 +3577,7 @@ export default function Home() {
         <div className="flex h-screen bg-[#121212] overflow-hidden">
             {/* Sidebar */}
             <aside className={`bg-[#1a1a1a] border-r border-gray-800 flex flex-col flex-shrink-0 z-10 transition-all duration-300 ${isSidebarCollapsed ? 'w-16' : 'w-64'}`}>
-                <div className={`h-full flex flex-col ${isSidebarCollapsed ? 'items-center px-2 py-6' : 'p-6'}`}>
+                <div className={`h-full flex flex-col overflow-y-auto scrollbar-hide ${isSidebarCollapsed ? 'items-center px-2 py-6' : 'p-6'}`}>
                     <div className={`flex items-center mb-10 ${isSidebarCollapsed ? 'justify-center' : 'justify-between'}`}>
                         {!isSidebarCollapsed && (
                             <h1
