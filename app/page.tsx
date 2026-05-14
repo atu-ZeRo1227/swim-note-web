@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { auth, db, storage } from "@/lib/firebase";
 import { onAuthStateChanged, signOut, User, reauthenticateWithCredential, EmailAuthProvider, updateEmail, updatePassword, deleteUser, GoogleAuthProvider, OAuthProvider } from "firebase/auth";
-import { doc, getDoc, setDoc, deleteDoc, getDocs, serverTimestamp, collection, query, orderBy, limit, onSnapshot, collectionGroup, where } from "firebase/firestore";
+import { doc, getDoc, setDoc, deleteDoc, getDocs, serverTimestamp, collection, query, orderBy, limit, onSnapshot, collectionGroup, where, writeBatch } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useRouter } from "next/navigation";
 import { Menu } from "lucide-react";
+import { Reorder, useDragControls } from "framer-motion";
 
 interface Profile {
     nickname: string;
@@ -53,6 +54,7 @@ interface SwimmingTime {
     poolType: "long" | "short";
     date?: string;
     timestamp?: any;
+    order?: number;
 }
 
 interface Announcement {
@@ -63,6 +65,66 @@ interface Announcement {
     date: string;
     timestamp: any;
 }
+
+const TimeHistoryItem = ({ time, onEdit }: { time: SwimmingTime, onEdit: (t: SwimmingTime) => void }) => {
+    const controls = useDragControls();
+    const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+    const handlePointerDown = (e: React.PointerEvent) => {
+        if (e.button !== 0) return; // Only left click / primary touch
+        // Start long press timer
+        timeoutRef.current = setTimeout(() => {
+            controls.start(e);
+            if (window.navigator && window.navigator.vibrate) {
+                window.navigator.vibrate(50);
+            }
+        }, 400); // 400ms delay for long press
+    };
+
+    const cancelPress = () => {
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+
+    return (
+        <Reorder.Item
+            value={time}
+            id={time.id}
+            dragListener={false}
+            dragControls={controls}
+            onPointerDown={handlePointerDown}
+            onPointerUp={cancelPress}
+            onPointerCancel={cancelPress}
+            onPointerLeave={cancelPress}
+            onContextMenu={(e) => e.preventDefault()}
+            className="w-full bg-[#1a1a1a] p-5 rounded-2xl border border-gray-800 hover:border-white/20 transition-all flex justify-between items-center relative select-none touch-pan-y"
+            style={{ WebkitTouchCallout: "none" }}
+        >
+            <div 
+                className="absolute inset-0 cursor-pointer"
+                onClick={() => {
+                    cancelPress();
+                    onEdit(time);
+                }}
+            />
+            <div className="text-left relative z-10 pointer-events-none">
+                <div className="flex items-center space-x-2 text-xs font-bold text-gray-500 mb-1">
+                    <span>{time.date}</span>
+                    <span className={`px-1.5 py-0.5 rounded text-[8px] uppercase tracking-tighter ${time.poolType === 'long' ? 'bg-blue-500/20 text-blue-400' : 'bg-green-500/20 text-green-400'}`}>
+                        {time.poolType === 'long' ? '長水路' : '短水路'}
+                    </span>
+                </div>
+                <div className="flex items-baseline space-x-2">
+                    <span className="text-lg font-bold text-white/90">{time.stroke}</span>
+                    <span className="text-sm text-gray-400">{time.distance}</span>
+                </div>
+            </div>
+            <div className="text-right relative z-10 pointer-events-none">
+                <div className="text-xl font-black text-blue-400 font-mono">{time.time}</div>
+                <div className="text-[10px] text-gray-600 mt-1">タップで編集 / 長押しで移動</div>
+            </div>
+        </Reorder.Item>
+    );
+};
 
 const parseSwimmingTime = (timeStr: string) => {
     if (!timeStr) return 999999;
@@ -148,11 +210,13 @@ export default function Home() {
     const [newComment, setNewComment] = useState("");
     const [timeHistory, setTimeHistory] = useState<SwimmingTime[]>([]);
     const [editingTime, setEditingTime] = useState<SwimmingTime | null>(null);
-    const [timeSortOption, setTimeSortOption] = useState<string>("date_desc");
+    const [timeSortOption, setTimeSortOption] = useState<string>("custom");
 
     const sortedTimeHistory = useMemo(() => {
         const times = [...timeHistory];
         switch (timeSortOption) {
+            case "custom":
+                return times.sort((a, b) => (a.order || 0) - (b.order || 0));
             case "date_desc":
                 return times.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
             case "date_asc":
@@ -1090,11 +1154,17 @@ export default function Home() {
     const fetchTimeHistory = async () => {
         if (!user) return;
         try {
-            const q = query(collection(db, "users", user.uid, "swimming_times"), orderBy("date", "desc"));
+            // Sort client side based on 'order' mostly, we just fetch all times.
+            const q = query(collection(db, "users", user.uid, "swimming_times"));
             const querySnapshot = await getDocs(q);
             const times: SwimmingTime[] = [];
             querySnapshot.forEach((doc) => {
                 times.push({ id: doc.id, ...doc.data() } as SwimmingTime);
+            });
+            // Initial load sorted by custom order or newest if no order
+            times.sort((a, b) => {
+                if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+                return new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime();
             });
             setTimeHistory(times);
             setShowTimeHistory(true);
@@ -1855,6 +1925,7 @@ export default function Home() {
                                     onChange={(e) => setTimeSortOption(e.target.value)}
                                     className="appearance-none bg-[#1a1a1a] text-xs font-bold text-gray-300 border border-gray-800 rounded-lg pl-3 pr-8 py-2 outline-none focus:border-white/50 transition-all cursor-pointer"
                                 >
+                                    <option value="custom">カスタム（長押しで並び替え）</option>
                                     <option value="date_desc">新しい順</option>
                                     <option value="date_asc">古い順</option>
                                     <option value="time_asc">タイムが速い順</option>
@@ -1871,30 +1942,33 @@ export default function Home() {
 
                         <div className="space-y-3">
                             {sortedTimeHistory.length > 0 ? (
-                                sortedTimeHistory.map((time) => (
-                                    <button
-                                        key={time.id}
-                                        onClick={() => handleEditTime(time)}
-                                        className="w-full bg-[#1a1a1a] p-5 rounded-2xl border border-gray-800 hover:border-white/20 transition-all flex justify-between items-center group active:scale-[0.98]"
-                                    >
-                                        <div className="text-left">
-                                            <div className="flex items-center space-x-2 text-xs font-bold text-gray-500 mb-1">
-                                                <span>{time.date}</span>
-                                                <span className={`px-1.5 py-0.5 rounded text-[8px] uppercase tracking-tighter ${time.poolType === 'long' ? 'bg-blue-500/20 text-blue-400' : 'bg-green-500/20 text-green-400'}`}>
-                                                    {time.poolType === 'long' ? '長水路' : '短水路'}
-                                                </span>
-                                            </div>
-                                            <div className="flex items-baseline space-x-2">
-                                                <span className="text-lg font-bold text-white/90">{time.stroke}</span>
-                                                <span className="text-sm text-gray-400">{time.distance}</span>
-                                            </div>
-                                        </div>
-                                        <div className="text-right">
-                                            <div className="text-xl font-black text-blue-400 font-mono">{time.time}</div>
-                                            <div className="text-[10px] text-gray-600 mt-1">タップして編集</div>
-                                        </div>
-                                    </button>
-                                ))
+                                <Reorder.Group 
+                                    axis="y" 
+                                    values={sortedTimeHistory} 
+                                    onReorder={async (newOrder) => {
+                                        // Update state with new order
+                                        const ordered = newOrder.map((item, index) => ({ ...item, order: index }));
+                                        setTimeHistory(ordered);
+                                        setTimeSortOption("custom");
+
+                                        if (!user) return;
+                                        try {
+                                            const batch = writeBatch(db);
+                                            ordered.forEach((time) => {
+                                                const docRef = doc(db, "users", user.uid, "swimming_times", time.id!);
+                                                batch.update(docRef, { order: time.order });
+                                            });
+                                            await batch.commit();
+                                        } catch (e) {
+                                            console.error("Error saving new order:", e);
+                                        }
+                                    }}
+                                    className="space-y-3"
+                                >
+                                    {sortedTimeHistory.map((time) => (
+                                        <TimeHistoryItem key={time.id} time={time} onEdit={handleEditTime} />
+                                    ))}
+                                </Reorder.Group>
                             ) : (
                                 <div className="text-center py-20 text-gray-500">
                                     まだタイムの記録がありません

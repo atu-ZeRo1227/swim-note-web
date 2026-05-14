@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendEmailVerification, sendPasswordResetEmail, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, OAuthProvider, signInWithCredential } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
 import { doc, setDoc, serverTimestamp, getDoc } from "firebase/firestore";
@@ -14,6 +14,8 @@ export default function LoginPage() {
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
     const [message, setMessage] = useState("");
+    const [isLiffReady, setIsLiffReady] = useState(false);
+    const liffInitStarted = useRef(false);
 
     // Handle redirect result (for mobile/safari compatibility)
     useEffect(() => {
@@ -52,6 +54,7 @@ export default function LoginPage() {
     // LIFF Initialization and Auto Login
     useEffect(() => {
         const initLiff = async () => {
+            if (liffInitStarted.current) return;
             const liffId = process.env.NEXT_PUBLIC_LIFF_ID;
             if (!liffId) {
                 console.error("LIFF ID is not defined in environment variables.");
@@ -59,13 +62,20 @@ export default function LoginPage() {
             }
 
             try {
+                liffInitStarted.current = true;
                 await liff.init({ liffId });
+                setIsLiffReady(true);
                 // LINEアプリ内ブラウザで開いている場合は、自動的にログイン処理を行う
                 if (liff.isInClient()) {
                     if (!liff.isLoggedIn()) {
                         liff.login();
                     } else {
                         // 既にLIFFにログイン済みの場合はFirebaseとも同期
+                        await handleLiffFirebaseLogin();
+                    }
+                } else {
+                    // クライアント外でもログイン済みなら同期
+                    if (liff.isLoggedIn()) {
                         await handleLiffFirebaseLogin();
                     }
                 }
@@ -256,14 +266,18 @@ export default function LoginPage() {
         setMessage("");
         
         try {
+            if (!isLiffReady) {
+                setError("LINEログインの準備ができていません。再読み込みするか、しばらくお待ちください。");
+                return;
+            }
             if (!liff.isLoggedIn()) {
-                liff.login();
+                liff.login({ redirectUri: window.location.href });
                 return;
             }
             await handleLiffFirebaseLogin();
         } catch (e: any) {
             console.error("LINE Auth Error:", e);
-            setError(`LINE認証に失敗しました。`);
+            setError(`LINE認証に失敗しました。: ${e.message || "詳細不明"}`);
         }
     };
 
