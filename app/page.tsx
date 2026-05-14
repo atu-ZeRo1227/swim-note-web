@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { auth, db, storage } from "@/lib/firebase";
 import { onAuthStateChanged, signOut, User, reauthenticateWithCredential, EmailAuthProvider, updateEmail, updatePassword, deleteUser, GoogleAuthProvider, OAuthProvider } from "firebase/auth";
 import { doc, getDoc, setDoc, deleteDoc, getDocs, serverTimestamp, collection, query, orderBy, limit, onSnapshot, collectionGroup, where } from "firebase/firestore";
@@ -63,6 +63,16 @@ interface Announcement {
     date: string;
     timestamp: any;
 }
+
+const parseSwimmingTime = (timeStr: string) => {
+    if (!timeStr) return 999999;
+    const normalized = timeStr.replace(/[０-９：．]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)).trim();
+    if (normalized.includes(':')) {
+        const [min, sec] = normalized.split(':');
+        return (parseFloat(min) || 0) * 60 + (parseFloat(sec) || 0);
+    }
+    return parseFloat(normalized) || 999999;
+};
 
 export default function Home() {
     const router = useRouter();
@@ -138,6 +148,25 @@ export default function Home() {
     const [newComment, setNewComment] = useState("");
     const [timeHistory, setTimeHistory] = useState<SwimmingTime[]>([]);
     const [editingTime, setEditingTime] = useState<SwimmingTime | null>(null);
+    const [timeSortOption, setTimeSortOption] = useState<string>("date_desc");
+
+    const sortedTimeHistory = useMemo(() => {
+        const times = [...timeHistory];
+        switch (timeSortOption) {
+            case "date_desc":
+                return times.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+            case "date_asc":
+                return times.sort((a, b) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime());
+            case "time_asc":
+                return times.sort((a, b) => parseSwimmingTime(a.time) - parseSwimmingTime(b.time));
+            case "time_desc":
+                return times.sort((a, b) => parseSwimmingTime(b.time) - parseSwimmingTime(a.time));
+            case "distance_asc":
+                return times.sort((a, b) => (parseInt(a.distance) || 0) - (parseInt(b.distance) || 0));
+            default:
+                return times;
+        }
+    }, [timeHistory, timeSortOption]);
 
     const [timeForm, setTimeForm] = useState<SwimmingTime>({
         stroke: "",
@@ -672,10 +701,10 @@ export default function Home() {
                     canvas.height = height;
                     const ctx = canvas.getContext('2d');
                     ctx?.drawImage(img, 0, 0, width, height);
-                    
+
                     const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
                     setCommunityPhotoPreview(dataUrl);
-                    
+
                     // Convert back to blob for Firebase upload
                     canvas.toBlob((blob) => {
                         if (blob) {
@@ -722,7 +751,7 @@ export default function Home() {
             const userDoc = await getDoc(doc(db, "users", userId));
             if (userDoc.exists()) {
                 setViewingUser({ id: userDoc.id, ...userDoc.data() });
-                
+
                 // Fetch stats
                 const followingSnap = await getDocs(collection(db, "users", userId, "following"));
                 // Query followers using the followedUid field
@@ -779,13 +808,13 @@ export default function Home() {
         if (!user) return;
         try {
             // Add to following of requester (requester follows user)
-            await setDoc(doc(db, "users", requesterUid, "following", user.uid), { 
+            await setDoc(doc(db, "users", requesterUid, "following", user.uid), {
                 timestamp: serverTimestamp(),
                 followedUid: user.uid,
                 followerUid: requesterUid
             });
             // Add to following of user (user follows requester - mutual follow)
-            await setDoc(doc(db, "users", user.uid, "following", requesterUid), { 
+            await setDoc(doc(db, "users", user.uid, "following", requesterUid), {
                 timestamp: serverTimestamp(),
                 followedUid: requesterUid,
                 followerUid: user.uid
@@ -1230,7 +1259,7 @@ export default function Home() {
                 setShowDailyReminder(false);
             }
         };
-        
+
         checkTime(); // Initial check
         const timer = setInterval(checkTime, 60000); // Check every minute
         return () => clearInterval(timer);
@@ -1358,7 +1387,7 @@ export default function Home() {
             return (
                 <main className="min-h-screen bg-[#121212] flex flex-col animate-in fade-in duration-300">
                     {/* Header Image */}
-                    <div 
+                    <div
                         className={`h-40 relative shrink-0 ${!viewingUser.headerUrl ? 'bg-gradient-to-r from-purple-600 to-pink-600' : ''}`}
                         style={viewingUser.headerUrl ? { backgroundImage: `url(${viewingUser.headerUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}}
                     >
@@ -1418,14 +1447,14 @@ export default function Home() {
                                 <span className="font-bold text-white">🏊</span>
                                 <span>{viewingUser.stroke || "未設定"}</span>
                             </div>
-                            <button 
+                            <button
                                 onClick={() => handleOpenFollowList('following', viewingUser.id, viewingUser.nickname)}
                                 className="flex items-center space-x-1 hover:text-white transition-colors"
                             >
                                 <span className="font-bold text-white">{viewingUserStats.following}</span>
                                 <span>フォロー中</span>
                             </button>
-                            <button 
+                            <button
                                 onClick={() => handleOpenFollowList('followers', viewingUser.id, viewingUser.nickname)}
                                 className="flex items-center space-x-1 hover:text-white transition-colors"
                             >
@@ -1467,7 +1496,7 @@ export default function Home() {
 
                                                 <div className="space-y-4">
                                                     <p className="text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">{post.text}</p>
-                                                    
+
                                                     {/* Post Actions */}
                                                     <div className="flex items-center justify-between pt-4 border-t border-gray-800/50">
                                                         <div className="flex items-center space-x-6">
@@ -1795,31 +1824,54 @@ export default function Home() {
             return (
                 <main className="min-h-screen bg-[#121212] text-white p-6 flex flex-col items-center">
                     <div className="w-full max-w-md">
-                        <header className="flex items-center mb-8">
+                        <header className="flex items-center mb-6">
                             <button
                                 onClick={() => setShowTimeHistory(false)}
                                 className="mr-3 p-2 hover:bg-white/10 rounded-full transition-colors"
                             >
                                 ←
                             </button>
-                            <div className="flex items-center space-x-3">
-                                <h2 className="text-2xl font-bold tracking-tight">自己ベスト</h2>
-                                <button
-                                    onClick={() => {
-                                        setEditingTime(null);
-                                        setTimeForm({ stroke: "", distance: "", time: "", poolType: "short" });
-                                        setShowTimeInput(true);
-                                    }}
-                                    className="bg-white text-black text-[11px] font-black px-4 py-2 rounded-full hover:bg-gray-200 transition-all active:scale-95"
-                                >
-                                    タイム記入
-                                </button>
+                            <div className="flex items-center justify-between flex-1">
+                                <div className="flex items-center space-x-3">
+                                    <h2 className="text-2xl font-bold tracking-tight">自己ベスト</h2>
+                                    <button
+                                        onClick={() => {
+                                            setEditingTime(null);
+                                            setTimeForm({ stroke: "", distance: "", time: "", poolType: "short" });
+                                            setShowTimeInput(true);
+                                        }}
+                                        className="bg-white text-black text-[11px] font-black px-4 py-2 rounded-full hover:bg-gray-200 transition-all active:scale-95"
+                                    >
+                                        タイム記入
+                                    </button>
+                                </div>
                             </div>
                         </header>
 
+                        <div className="flex justify-end mb-4">
+                            <div className="relative">
+                                <select
+                                    value={timeSortOption}
+                                    onChange={(e) => setTimeSortOption(e.target.value)}
+                                    className="appearance-none bg-[#1a1a1a] text-xs font-bold text-gray-300 border border-gray-800 rounded-lg pl-3 pr-8 py-2 outline-none focus:border-white/50 transition-all cursor-pointer"
+                                >
+                                    <option value="date_desc">新しい順</option>
+                                    <option value="date_asc">古い順</option>
+                                    <option value="time_asc">タイムが速い順</option>
+                                    <option value="time_desc">タイムが遅い順</option>
+                                    <option value="distance_asc">距離が短い順</option>
+                                </select>
+                                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
+                                    <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                                        <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z" />
+                                    </svg>
+                                </div>
+                            </div>
+                        </div>
+
                         <div className="space-y-3">
-                            {timeHistory.length > 0 ? (
-                                timeHistory.map((time) => (
+                            {sortedTimeHistory.length > 0 ? (
+                                sortedTimeHistory.map((time) => (
                                     <button
                                         key={time.id}
                                         onClick={() => handleEditTime(time)}
@@ -2312,7 +2364,7 @@ export default function Home() {
             return (
                 <main className="min-h-screen bg-[#121212] text-white flex flex-col">
                     {/* Header Image */}
-                    <div 
+                    <div
                         className={`h-40 relative shrink-0 ${!profile.headerUrl ? 'bg-gradient-to-r from-blue-600 to-purple-600' : ''}`}
                         style={profile.headerUrl ? { backgroundImage: `url(${profile.headerUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}}
                     >
@@ -2362,14 +2414,14 @@ export default function Home() {
                                         profile.stroke === 'breast' ? '平泳ぎ' :
                                             profile.stroke === 'fly' ? 'バタフライ' : '個人メドレー'}</span>
                             </div>
-                            <button 
+                            <button
                                 onClick={() => handleOpenFollowList('following', user?.uid || '', profile.nickname)}
                                 className="flex items-center space-x-1 hover:text-white transition-colors"
                             >
                                 <span className="font-bold text-white">{followingList.length}</span>
                                 <span>フォロー中</span>
                             </button>
-                            <button 
+                            <button
                                 onClick={() => handleOpenFollowList('followers', user?.uid || '', profile.nickname)}
                                 className="flex items-center space-x-1 hover:text-white transition-colors"
                             >
@@ -2410,7 +2462,7 @@ export default function Home() {
 
                                             <div className="space-y-4">
                                                 <p className="text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">{post.text}</p>
-                                                
+
                                                 {/* Post Actions */}
                                                 <div className="flex items-center justify-between pt-4 border-t border-gray-800/50">
                                                     <div className="flex items-center space-x-6">
@@ -2568,7 +2620,7 @@ export default function Home() {
                                     <div key={post.id} className="bg-[#1a1a1a] rounded-3xl border border-gray-800 overflow-hidden shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-500">
                                         <div className="p-6">
                                             <div className="flex justify-between items-center mb-4">
-                                                 <button
+                                                <button
                                                     onClick={() => handleViewUserProfile(post.userId)}
                                                     className="flex items-center space-x-3 hover:opacity-70 transition-opacity text-left"
                                                 >
@@ -2666,7 +2718,7 @@ export default function Home() {
                                                             ) : (
                                                                 <p className="text-center text-[10px] text-gray-600 py-2 italic">最初のコメントを投稿しましょう</p>
                                                             )}
-                                                         </div>
+                                                        </div>
 
                                                         <div className="flex items-center space-x-2 pt-2">
                                                             <input
@@ -3253,7 +3305,7 @@ export default function Home() {
                 </main>
             );
         }
- 
+
         // Profile Setup / Edit Form (優先度を下げ、Home画面の代わりとして表示)
         if (needsSetup || (showProfileEdit && user)) {
             return (
@@ -3394,7 +3446,7 @@ export default function Home() {
                 </main>
             );
         }
- 
+
         return (
             <main className="min-h-screen bg-[#121212] text-white p-6">
                 <div className="max-w-md mx-auto">
