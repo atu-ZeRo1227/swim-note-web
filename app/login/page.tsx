@@ -271,7 +271,7 @@ export default function LoginPage() {
                 return;
             }
             if (!liff.isLoggedIn()) {
-                liff.login({ redirectUri: window.location.href });
+                liff.login();
                 return;
             }
             await handleLiffFirebaseLogin();
