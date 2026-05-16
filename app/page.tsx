@@ -142,6 +142,7 @@ export default function Home() {
     const [loading, setLoading] = useState(true);
     const [profile, setProfile] = useState<Profile | null>(null);
     const [needsSetup, setNeedsSetup] = useState(false);
+    const [needsAccountSetup, setNeedsAccountSetup] = useState(false);
     const [isEmailUnverified, setIsEmailUnverified] = useState(false);
 
     const [showSettings, setShowSettings] = useState(false);
@@ -443,10 +444,18 @@ export default function Home() {
 
             // 保存成功後に状態を更新
             setProfile({ ...formData, iconUrl, headerUrl });
-            setNeedsSetup(false);
-            setShowProfileEdit(false);
-            setShowAccountEdit(false);
-            setShowSettings(false);
+            if (needsSetup) {
+                setNeedsSetup(false);
+                setNeedsAccountSetup(true);
+                setShowProfileEdit(false);
+            } else if (needsAccountSetup) {
+                setNeedsAccountSetup(false);
+            } else {
+                setNeedsSetup(false);
+                setShowProfileEdit(false);
+                setShowAccountEdit(false);
+                setShowSettings(false);
+            }
         } catch (error: any) {
             console.error("Error saving profile to Firestore:", error);
         } finally {
@@ -2489,7 +2498,7 @@ export default function Home() {
                         <div className="flex items-center space-x-6 text-sm text-gray-500 mb-6">
                             <div className="flex items-center space-x-1">
                                 <span className="font-bold text-white">🏊</span>
-                                <span>{profile.stroke === 'free' ? 'Free' :
+                                <span>{profile.stroke === 'free' ? '自由形' :
                                     profile.stroke === 'back' ? '背泳ぎ' :
                                         profile.stroke === 'breast' ? '平泳ぎ' :
                                             profile.stroke === 'fly' ? 'バタフライ' : '個人メドレー'}</span>
@@ -3096,16 +3105,18 @@ export default function Home() {
 
 
         // Account Edit Form (Age, Gender, Stroke, etc.)
-        if (showAccountEdit && user) {
+        if ((needsAccountSetup || showAccountEdit) && user) {
             return (
                 <main className="min-h-screen bg-[#121212] text-white p-6 flex items-center justify-center">
                     <div className="w-full max-w-md bg-[#1a1a1a] p-8 rounded-2xl border border-gray-800 shadow-2xl relative">
-                        <button
-                            onClick={() => setShowAccountEdit(false)}
-                            className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors"
-                        >
-                            ✕
-                        </button>
+                        {!needsAccountSetup && (
+                            <button
+                                onClick={() => setShowAccountEdit(false)}
+                                className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors"
+                            >
+                                ✕
+                            </button>
+                        )}
                         <h2 className="text-2xl font-bold mb-6 text-center tracking-tight">アカウント詳細設定</h2>
                         <form onSubmit={handleProfileSubmit} className="space-y-4">
                             <div>
@@ -3157,7 +3168,7 @@ export default function Home() {
                                     onChange={(e) => setFormData({ ...formData, stroke: e.target.value })}
                                 >
                                     <option value="">選択してください</option>
-                                    <option value="free">Free</option>
+                                    <option value="free">自由形</option>
                                     <option value="back">背泳ぎ</option>
                                     <option value="breast">平泳ぎ</option>
                                     <option value="fly">バタフライ</option>
@@ -3237,47 +3248,48 @@ export default function Home() {
 
                         <div className="space-y-6">
                             <section>
-                                <h3 className="text-[10px] font-black text-gray-500 mb-3 uppercase tracking-[0.2em] ml-1">基本情報</h3>
+                                <h3 className="text-[10px] font-black text-gray-500 mb-3 uppercase tracking-[0.2em] ml-1">現在のログイン方法</h3>
                                 <div className="bg-[#1a1a1a] rounded-2xl border border-gray-800 overflow-hidden">
-                                    {/* 電話番号 */}
-                                    <div className="flex justify-between items-center px-5 py-4 border-b border-gray-800/50">
-                                        <span className="text-sm font-bold text-gray-400">電話番号</span>
-                                        <span className="text-sm text-gray-200">{user?.phoneNumber || "未登録"}</span>
-                                    </div>
+                                    {isEmailUser && (
+                                        <>
+                                            <div className="flex justify-between items-center px-5 py-4 border-b border-gray-800/50">
+                                                <span className="text-sm font-bold text-gray-400">メールアドレス</span>
+                                                <span className="text-sm text-gray-200 truncate max-w-[180px]">{user?.email || "未登録"}</span>
+                                            </div>
+                                            <button
+                                                onClick={() => setShowLoginEdit(true)}
+                                                className="w-full flex justify-between items-center px-5 py-4 hover:bg-white/5 transition-colors group"
+                                            >
+                                                <span className="text-sm font-bold text-gray-400">メール・パスワード変更</span>
+                                                <span className="text-sm text-gray-200 flex items-center">
+                                                    変更する <span className="ml-2 text-gray-600 group-hover:translate-x-1 transition-transform">＞</span>
+                                                </span>
+                                            </button>
+                                        </>
+                                    )}
 
-                                    {/* メールアドレス */}
-                                    <div className="flex justify-between items-center px-5 py-4 border-b border-gray-800/50">
-                                        <span className="text-sm font-bold text-gray-400">メールアドレス</span>
-                                        <span className="text-sm text-gray-200 truncate max-w-[180px]">{user?.email || "未登録"}</span>
-                                    </div>
+                                    {isGoogleUser && (
+                                        <div className="flex justify-between items-center px-5 py-5">
+                                            <div className="flex flex-col">
+                                                <span className="text-sm font-bold text-gray-400">Google</span>
+                                                <div className="flex space-x-2 mt-2">
+                                                    <span className="text-[10px] bg-blue-500/20 px-2 py-0.5 rounded text-blue-400">🌐 ログイン中</span>
+                                                </div>
+                                            </div>
+                                            <span className="text-sm text-gray-200 truncate max-w-[150px]">{user?.email}</span>
+                                        </div>
+                                    )}
 
-                                    {/* パスワード */}
-                                    <button
-                                        onClick={() => isEmailUser && setShowLoginEdit(true)}
-                                        className="w-full flex justify-between items-center px-5 py-4 border-b border-gray-800/50 hover:bg-white/5 transition-colors group"
-                                    >
-                                        <span className="text-sm font-bold text-gray-400">パスワード</span>
-                                        <span className="text-sm text-gray-200 flex items-center">
-                                            登録完了 <span className="ml-2 text-gray-600 group-hover:translate-x-1 transition-transform">＞</span>
-                                        </span>
-                                    </button>
-
-                                    <div className="flex justify-between items-center px-5 py-5">
-                                        <div className="flex flex-col">
-                                            <span className="text-sm font-bold text-gray-400">Google連携</span>
-                                            <div className="flex space-x-2 mt-2">
-                                                {isGoogleUser && <span className="text-[10px] bg-blue-500/20 px-2 py-0.5 rounded text-blue-400">🌐 Google連携中</span>}
+                                    {(!isEmailUser && !isGoogleUser) && (
+                                        <div className="flex justify-between items-center px-5 py-5">
+                                            <div className="flex flex-col">
+                                                <span className="text-sm font-bold text-gray-400">LINE</span>
+                                                <div className="flex space-x-2 mt-2">
+                                                    <span className="text-[10px] bg-[#06C755]/20 px-2 py-0.5 rounded text-[#06C755]">💬 ログイン中</span>
+                                                </div>
                                             </div>
                                         </div>
-                                        <button
-                                            onClick={() => {
-                                                alert("この機能は現在準備中です。");
-                                            }}
-                                            className="bg-white text-black text-[10px] font-black px-4 py-2 rounded-full hover:bg-gray-200 transition-all active:scale-95"
-                                        >
-                                            連携する
-                                        </button>
-                                    </div>
+                                    )}
                                 </div>
                             </section>
 
@@ -3391,15 +3403,17 @@ export default function Home() {
             return (
                 <main className="min-h-screen bg-[#121212] text-white p-6 flex items-start justify-center overflow-y-auto pt-12 md:items-center md:pt-6">
                     <div className="w-full max-w-md bg-[#1a1a1a] p-8 rounded-2xl border border-gray-800 shadow-2xl relative mb-12">
-                        <button
-                            onClick={() => {
-                                setNeedsSetup(false);
-                                setShowProfileEdit(false);
-                            }}
-                            className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors p-2"
-                        >
-                            ✕
-                        </button>
+                        {!needsSetup && (
+                            <button
+                                onClick={() => {
+                                    setNeedsSetup(false);
+                                    setShowProfileEdit(false);
+                                }}
+                                className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors p-2"
+                            >
+                                ✕
+                            </button>
+                        )}
                         <h2 className="text-2xl font-bold mb-6 text-center tracking-tight">
                             {needsSetup ? "初期設定" : "プロフィール編集"}
                         </h2>
@@ -3461,7 +3475,7 @@ export default function Home() {
                                     onChange={(e) => setFormData({ ...formData, stroke: e.target.value })}
                                 >
                                     <option value="">選択してください</option>
-                                    <option value="free">Free</option>
+                                    <option value="free">自由形</option>
                                     <option value="back">背泳ぎ</option>
                                     <option value="breast">平泳ぎ</option>
                                     <option value="fly">バタフライ</option>
@@ -3479,38 +3493,6 @@ export default function Home() {
                                 />
                             </div>
 
-                            {needsSetup && (
-                                <div className="pt-6 border-t border-gray-800 mt-6 space-y-4">
-                                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest text-center mb-4">以下の情報は後で設定から変更できます</p>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">年齢</label>
-                                            <input
-                                                required
-                                                type="number"
-                                                className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
-                                                value={formData.age}
-                                                onChange={(e) => setFormData({ ...formData, age: e.target.value })}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-widest">性別</label>
-                                            <select
-                                                required
-                                                className="w-full bg-black border border-gray-800 rounded-lg px-4 py-2 focus:ring-1 focus:ring-white outline-none transition-all"
-                                                value={formData.gender}
-                                                onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
-                                            >
-                                                <option value="">選択</option>
-                                                <option value="male">男性</option>
-                                                <option value="female">女性</option>
-                                                <option value="other">その他</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
                             <button
                                 type="submit"
                                 disabled={isSubmitting}
@@ -3519,7 +3501,7 @@ export default function Home() {
                                     : "bg-white text-black hover:bg-gray-200"
                                     }`}
                             >
-                                {isSubmitting ? "保存中..." : needsSetup ? "設定を完了する" : "保存する"}
+                                {isSubmitting ? "保存中..." : needsSetup ? "次へ" : "保存する"}
                             </button>
                         </form>
                     </div>
@@ -3705,6 +3687,16 @@ export default function Home() {
         );
     };
 
+    if (needsSetup || needsAccountSetup) {
+        return (
+            <div className="flex h-screen bg-[#121212] overflow-hidden w-full relative">
+                <div className="flex-1 overflow-y-auto w-full relative">
+                    {renderContent()}
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="flex h-screen bg-[#121212] overflow-hidden">
             {/* Sidebar */}
@@ -3743,7 +3735,7 @@ export default function Home() {
                                 <div className="flex flex-col">
                                     <span className="text-xs font-black text-white/90 truncate max-w-[100px]">{profile.nickname}</span>
                                     <span className="text-[8px] text-gray-500 font-bold uppercase tracking-widest">
-                                        {profile.stroke === 'free' ? 'Free' :
+                                        {profile.stroke === 'free' ? '自由形' :
                                             profile.stroke === 'back' ? '背泳ぎ' :
                                                 profile.stroke === 'breast' ? '平泳ぎ' :
                                                     profile.stroke === 'fly' ? 'バタフライ' :
