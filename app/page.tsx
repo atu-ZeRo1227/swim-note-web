@@ -506,11 +506,11 @@ export default function Home() {
             const uniqueId = `${today}_${timestamp}`;
 
             // 既存の記録件数を確認
-            const q = query(collection(db, "users", user.uid, "daily_records"));
+            const q = query(collection(db, "users", user.uid, "daily_records"), where("date", "==", today));
             const snapshot = await getDocs(q);
 
             if (snapshot.size >= 5) {
-                alert("記録は最大5件までです。");
+                alert("1日の記録は最大5件までです。");
                 setIsSubmitting(false);
                 return;
             }
@@ -575,11 +575,11 @@ export default function Home() {
             const uniqueId = `${today}_${timestamp}`;
 
             // 既存の記録件数を確認
-            const q = query(collection(db, "users", user.uid, "daily_records"));
+            const q = query(collection(db, "users", user.uid, "daily_records"), where("date", "==", today));
             const snapshot = await getDocs(q);
 
             if (snapshot.size >= 5) {
-                alert("記録は最大5件までです。新しい記録を作成するには既存の記録を解除するか、管理者にお問い合わせください。");
+                alert("1日の記録は最大5件までです。新しい記録を作成するには本日の既存の記録を削除してください。");
                 setIsSubmitting(false);
                 return;
             }
@@ -1541,7 +1541,13 @@ export default function Home() {
                         {/* User's Posts Feed */}
                         <div className="space-y-6">
                             {(() => {
-                                const userPosts = communityPosts.filter(p => p.userId === viewingUser.id);
+                                const userPosts = communityPosts.filter(p => {
+                                    if (p.userId !== viewingUser.id) return false;
+                                    if (p.visibility === 'followers' && p.userId !== user?.uid && !followingList.includes(p.userId)) {
+                                        return false;
+                                    }
+                                    return true;
+                                });
                                 return userPosts.length > 0 ? (
                                     userPosts.map(post => (
                                         <div key={post.id} className="bg-[#1a1a1a] rounded-3xl border border-gray-800 overflow-hidden shadow-xl animate-in fade-in duration-500">
